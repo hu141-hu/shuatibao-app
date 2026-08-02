@@ -3,6 +3,7 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useCallback, useState } from 'react';
 
 export default function ResultPage() {
   return (
@@ -14,6 +15,7 @@ export default function ResultPage() {
 
 function ResultContent() {
   const searchParams = useSearchParams();
+  const [shareState, setShareState] = useState<'idle' | 'done' | 'error'>('idle');
 
   const total = parseInt(searchParams.get('total') || '0');
   const correct = parseInt(searchParams.get('correct') || '0');
@@ -34,6 +36,26 @@ function ResultContent() {
   };
 
   const msg = getMessage();
+
+  const timeText = minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`;
+
+  // 分享成绩（原生分享，不支持时复制到剪贴板）
+  const handleShare = useCallback(async () => {
+    const text = `【刷题宝】本次成绩：答对 ${correct}/${total}（正确率 ${accuracy}%），用时 ${timeText}${category ? `，分类：${category}` : ''}`;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.share) {
+        await navigator.share({ title: '我的刷题成绩', text });
+        setShareState('done');
+      } else if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        setShareState('done');
+      } else {
+        setShareState('error');
+      }
+    } catch {
+      // 用户取消分享，不做处理
+    }
+  }, [correct, total, accuracy, timeText, category]);
 
   return (
     <div className="px-4 pt-8 pb-4 space-y-6">
@@ -68,8 +90,11 @@ function ResultContent() {
       <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700 text-center">
         <p className="text-sm text-gray-500 dark:text-slate-400">答题用时</p>
         <p className="text-2xl font-bold text-gray-800 dark:text-slate-200 mt-1">
-          {minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`}
+          {timeText}
         </p>
+        {shareState === 'done' && (
+          <p className="text-xs text-emerald-500 mt-1">✅ 已复制到剪贴板，去粘贴分享吧</p>
+        )}
       </div>
 
       {/* 统计数据 */}
@@ -97,8 +122,15 @@ function ResultContent() {
           🔄 再来一轮
         </Link>
 
+        <button
+          onClick={handleShare}
+          className="block w-full min-h-[52px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-semibold rounded-xl text-center leading-[52px] border-2 border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+        >
+          📤 分享成绩
+        </button>
+
         <Link
-          href="/profile"
+          href="/wrong-questions"
           className="block w-full min-h-[52px] bg-white dark:bg-slate-800 text-red-600 dark:text-red-400 font-semibold rounded-xl text-center leading-[52px] border-2 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors"
         >
           📕 查看错题

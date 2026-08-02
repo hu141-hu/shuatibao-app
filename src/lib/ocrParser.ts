@@ -1,5 +1,13 @@
 import { Question } from '@/types';
-import { parseMDContent } from '@/lib/mdParser';
+import { parseMDContent, ParseWarning } from '@/lib/mdParser';
+
+/**
+ * OCR 本地化开关：
+ * - 默认（false）：worker/语言包从 jsDelivr CDN 在线加载（国内可能慢/被墙）
+ * - 开启（true）：从 /ocr 加载本地资源，需先运行 node scripts/download-ocr-assets.mjs
+ */
+const OCR_LOCAL = process.env.NEXT_PUBLIC_OCR_LOCAL === 'true';
+const OCR_BASE = '/ocr';
 
 /**
  * 将 OCR 识别出的原始文本预处理为标准 MD 格式，
@@ -92,36 +100,52 @@ function normalizeOcrText(raw: string): string {
 export async function recognizeImage(
   imageFile: File,
   onProgress?: (progress: number) => void
-): Promise<{ text: string; questions: Question[] }> {
+): Promise<{ text: string; questions: Question[]; warnings: ParseWarning[] }> {
   // 动态导入 tesseract.js（避免 SSR 问题）
   const Tesseract = await import('tesseract.js');
 
-  const result = await Tesseract.recognize(imageFile, 'chi_sim+eng', {
-    logger: (m) => {
+  // 本地模式：指定 worker/核心/语言包路径；否则使用 tesseract 默认 CDN
+  const workerOptions = OCR_LOCAL
+    ? {
+        workerPath: `${OCR_BASE}/worker.min.js`,
+        corePath: OCR_BASE,
+        langPath: `${OCR_BASE}/lang`,
+      }
+    : {};
+
+  const worker = await Tesseract.createWorker('chi_sim+eng', 1, {
+    ...workerOptions,
+    logger: (m: { status: string; progress: number }) => {
       if (m.status === 'recognizing text' && onProgress) {
         onProgress(Math.round(m.progress * 100));
       }
     },
   });
+  const result = await worker.recognize(imageFile);
+  await worker.terminate();
 
   const rawText = result.data.text;
   const normalizedText = normalizeOcrText(rawText);
 
   // 尝试解析为题目
   const bankId = `ocr-${Date.now()}`;
-  const { questions } = parseMDContent(normalizedText, bankId);
+  const { questions, warnings } = parseMDContent(normalizedText, bankId);
 
   return {
     text: rawText,
     questions,
+    warnings,
   };
 }
 
 /**
  * 将用户编辑后的文本重新解析为题目
  */
-export function reparseText(text: string, bankId?: string): Question[] {
+export function reparseText(
+  text: string,
+  bankId?: string
+): { questions: Question[]; warnings: ParseWarning[] } {
   const id = bankId || `ocr-${Date.now()}`;
-  const { questions } = parseMDContent(text, id);
-  return questions;
+  const { questions, warnings } = parseMDContent(text, id);
+  return { questions, warnings };
 }

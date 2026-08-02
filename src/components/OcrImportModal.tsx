@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from 'react';
 import { recognizeImage, reparseText } from '@/lib/ocrParser';
+import { ParseWarning } from '@/lib/mdParser';
 import { Question } from '@/types';
 
 interface OcrImportModalProps {
@@ -21,6 +22,8 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
   const [rawTexts, setRawTexts] = useState<string[]>([]);
   const [editText, setEditText] = useState('');
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [parseWarnings, setParseWarnings] = useState<ParseWarning[]>([]);
+  const [failedCount, setFailedCount] = useState(0);
   const [bankName, setBankName] = useState('');
   const [resultMsg, setResultMsg] = useState('');
   const [resultType, setResultType] = useState<'success' | 'error'>('success');
@@ -54,6 +57,7 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
     setProgress(0);
 
     const allTexts: string[] = [];
+    let failed = 0;
 
     for (let i = 0; i < images.length; i++) {
       setCurrentIndex(i);
@@ -64,23 +68,26 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
         });
         allTexts.push(result.text);
       } catch {
-        allTexts.push(`[第 ${i + 1} 张图片识别失败]`);
+        failed += 1;
       }
     }
 
     setRawTexts(allTexts);
+    setFailedCount(failed);
     const combined = allTexts.join('\n\n');
     setEditText(combined);
 
     // 尝试自动解析
     const parsed = reparseText(combined);
-    setQuestions(parsed);
+    setQuestions(parsed.questions);
+    setParseWarnings(parsed.warnings);
     setIsProcessing(false);
   };
 
   const handleReparse = () => {
     const parsed = reparseText(editText);
-    setQuestions(parsed);
+    setQuestions(parsed.questions);
+    setParseWarnings(parsed.warnings);
   };
 
   const handleConfirmImport = () => {
@@ -108,6 +115,8 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
     setRawTexts([]);
     setEditText('');
     setQuestions([]);
+    setParseWarnings([]);
+    setFailedCount(0);
     setBankName('');
     setResultMsg('');
     setIsProcessing(false);
@@ -280,6 +289,11 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
                 <p className="text-xs text-gray-400 dark:text-slate-500">
                   首次使用需下载语言包，请耐心等待
                 </p>
+                {failedCount > 0 && (
+                  <p className="text-xs text-red-400 dark:text-red-500">
+                    {failedCount} 张图片识别失败，已跳过，可稍后重新选择重试
+                  </p>
+                )}
               </div>
 
               {/* 识别完成后显示文本预览 */}
@@ -308,6 +322,11 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
                     <p className="text-sm text-emerald-700 dark:text-emerald-400 font-medium">
                       解析出 {questions.length} 道题目
                     </p>
+                    {parseWarnings.length > 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                        ⚠️ {parseWarnings.length} 道题因答案/选项问题被跳过（识别文字中已标注，可编辑后重新解析）
+                      </p>
+                    )}
                     {questions.length > 0 && (
                       <div className="mt-2 space-y-1 max-h-28 overflow-y-auto">
                         {questions.slice(0, 5).map((q, i) => (

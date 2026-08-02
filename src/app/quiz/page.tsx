@@ -8,8 +8,16 @@ import QuestionCard from '@/components/QuestionCard';
 import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
 import FavoriteButton from '@/components/FavoriteButton';
+import { useSwipeNav } from '@/lib/useSwipeNav';
 
 const labels = ['A', 'B', 'C', 'D'];
+
+// 生成练习记录 ID（避免在事件处理器中使用 Math.random，满足 React 纯函数规则）
+let practiceSeq = 0;
+function nextPracticeId(): string {
+  practiceSeq += 1;
+  return `pr-${Date.now()}-${practiceSeq.toString(36)}`;
+}
 
 export default function QuizPage() {
   return (
@@ -59,12 +67,13 @@ function QuizContent() {
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [results, setResults] = useState<{ questionId: string; selected: number; isCorrect: boolean }[]>([]);
-  const [startTime] = useState(Date.now());
-  const [questionStartTime, setQuestionStartTime] = useState(Date.now());
+  const [startTime] = useState(() => Date.now());
+  const [questionStartTime, setQuestionStartTime] = useState(() => Date.now());
   const [confusedAnim, setConfusedAnim] = useState(false);
 
   // 支持 URL 参数直接跳转
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化时根据 URL 参数同步选中状态
     const chId = searchParams.get('chapterId');
     const secId = searchParams.get('sectionId');
     const oldCategory = searchParams.get('category');
@@ -73,6 +82,7 @@ function QuizContent() {
       // 从节ID找到章ID
       const sec = categoryHierarchy.find(c => c.id === secId);
       if (sec && sec.parentId) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化时根据 URL 参数同步选中状态
         setSelectedChapterId(sec.parentId);
       }
       setSelectedSectionId(secId);
@@ -134,7 +144,7 @@ function QuizContent() {
     // 记录刷题历史
     const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
     const record: PracticeRecord = {
-      id: `pr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: nextPracticeId(),
       date: new Date().toISOString().split('T')[0],
       questionId: currentQ.id,
       userAnswer: optionIndex,
@@ -159,27 +169,21 @@ function QuizContent() {
     setTimeout(() => setConfusedAnim(false), 600);
   }, [quizQuestions, currentIndex, toggleConfused]);
 
-  const handleNext = useCallback(() => {
-    if (currentIndex < quizQuestions.length - 1) {
-      setCurrentIndex(prev => prev + 1);
+  // 跳到指定题目：若该题此前已作答则恢复作答状态，否则保持未作答（滑动不显示答案）
+  const goToQuestion = useCallback((nextIndex: number) => {
+    if (nextIndex < 0 || nextIndex >= quizQuestions.length) return;
+    const target = quizQuestions[nextIndex];
+    const prev = results.find(r => r.questionId === target.id);
+    setCurrentIndex(nextIndex);
+    setQuestionStartTime(Date.now());
+    if (prev) {
+      setSelectedAnswer(prev.selected);
+      setShowResult(true);
+    } else {
       setSelectedAnswer(null);
       setShowResult(false);
-      setQuestionStartTime(Date.now());
-    } else {
-      const timeSpent = Math.floor((Date.now() - startTime) / 1000);
-      const correct = results.filter(r => r.isCorrect).length;
-      const wrong = results.filter(r => !r.isCorrect).length;
-      const params = new URLSearchParams({
-        total: quizQuestions.length.toString(),
-        correct: correct.toString(),
-        wrong: wrong.toString(),
-        unanswered: '0',
-        time: timeSpent.toString(),
-        category: selectedChapterId || '',
-      });
-      router.push(`/result?${params.toString()}`);
     }
-  }, [currentIndex, quizQuestions.length, startTime, results, router, selectedChapterId]);
+  }, [quizQuestions, results]);
 
   const handleBack = () => {
     if (quizQuestions.length > 0) {
@@ -192,6 +196,33 @@ function QuizContent() {
       setSelectedChapterId(null);
     }
   };
+
+  const handleNext = useCallback(() => {
+    if (currentIndex < quizQuestions.length - 1) {
+      goToQuestion(currentIndex + 1);
+    } else {
+      const timeSpent = Math.floor((Date.now() - startTime) / 1000);
+      const correct = results.filter(r => r.isCorrect).length;
+      const wrong = results.filter(r => !r.isCorrect).length;
+      const unansweredCount = quizQuestions.length - results.length;
+      const params = new URLSearchParams({
+        total: quizQuestions.length.toString(),
+        correct: correct.toString(),
+        wrong: wrong.toString(),
+        unanswered: unansweredCount.toString(),
+        time: timeSpent.toString(),
+        category: selectedChapterId || '',
+      });
+      router.push(`/result?${params.toString()}`);
+    }
+  }, [currentIndex, quizQuestions, startTime, results, router, selectedChapterId, goToQuestion]);
+
+  // 滑动手势：中间区左滑下一题/右滑上一题；左边距区左滑返回；右边距区右滑无效
+  const swipeRef = useSwipeNav<HTMLDivElement>({
+    onNext: () => goToQuestion(currentIndex + 1),
+    onPrev: () => goToQuestion(currentIndex - 1),
+    onLeftEdgeBack: handleBack,
+  });
 
   // 章选择界面
   if (!selectedChapterId) {
@@ -241,7 +272,7 @@ function QuizContent() {
       return (
         <div className="px-4 pt-6 pb-4 space-y-4">
           <div className="flex items-center gap-3">
-            <button onClick={handleBack} className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
+            <button onClick={handleBack} aria-label="返回" className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </button>
             <h1 className="text-lg font-bold text-gray-800 dark:text-slate-200">{chapter?.name || '选择节'}</h1>
@@ -289,10 +320,10 @@ function QuizContent() {
   const isConfused = confusedQuestions.includes(currentQ.id);
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-4">
+    <div ref={swipeRef} className="px-4 pt-6 pb-4 space-y-4">
       {/* 顶部进度条 */}
       <div className="flex items-center gap-3">
-        <button onClick={handleBack} className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
+        <button onClick={handleBack} aria-label="返回" className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div className="flex-1 h-2 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">

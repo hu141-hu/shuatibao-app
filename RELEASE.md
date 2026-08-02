@@ -6,6 +6,9 @@
 
 ## 步骤详解
 
+> 从零开始把项目放到 GitHub 并发布更新的完整图文步骤，见《文档/GitHub发布更新指南.md》
+> （仓库内路径：docs/GitHub发布更新指南.md 或项目外 E:\qoderxm\lj\文档\）。本文件为简化版。
+
 ### 1. 修改版本号
 
 需要在三个文件中同步更新版本号：
@@ -115,7 +118,7 @@ cd android
 
 ### 4. 上传到 GitHub Releases
 
-1. **访问发布页面**: https://github.com/shuatibao/app/releases
+1. **访问发布页面**: `https://github.com/<你的用户名>/<你的仓库名>/releases`
 
 2. **创建新 Release**:
    - Tag version: `v1.1.0` (格式：v + 版本号)
@@ -145,6 +148,15 @@ cd android
    git commit -m "chore: update version to v1.1.0 and release URL"
    git push
    ```
+
+### 5.5 同步更新 Service Worker 缓存版本（重要）
+
+打开 `public/sw.js`，把顶部的 `SW_VERSION` 改成新版本号（与 version.json 一致），
+否则旧用户会一直使用旧缓存页面：
+
+```js
+const SW_VERSION = 'v1.2.0'; // 👈 每次发版同步更新
+```
 
 ---
 
@@ -206,9 +218,11 @@ adb install app-release.apk
 
 ### Q5: APK 签名不一致怎么办？
 **A**: 
-- Debug 签名：`debug.keystore`
-- Release 签名：需要使用正式密钥库
+- Release 签名：使用 `android/app/app-release-key.jks`（密码在 `android/keystore.properties`，均不入库）
 - 从 Debug 升级到 Release 需要卸载旧版
+
+> ⚠️ 安全提醒：`app-release-key.jks` 和 `keystore.properties` 绝不能提交到 GitHub。
+> 换电脑构建时把这两个文件一起带过去，否则新包签名不同，用户无法覆盖安装。
 
 ---
 

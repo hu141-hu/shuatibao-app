@@ -6,11 +6,30 @@ import packageJson from '../../package.json';
 
 // 当前应用版本号（从 package.json 读取）
 export const CURRENT_VERSION = packageJson.version || '1.0.0';
-export const CURRENT_VERSION_CODE = parseInt(packageJson.version?.replace(/\./g, '') || '100');
 
-// 远程版本配置 URL (环境变量中配置)
-const VERSION_CHECK_URL = process.env.NEXT_PUBLIC_VERSION_CHECK_URL || 
-  'https://raw.githubusercontent.com/shuatibao/app/main/version.json';
+/**
+ * 远程版本检查地址（发布说明见 文档/GitHub发布更新指南.md）
+ *
+ * ⚠️ 发布前必须把下面的 shuatibao/app 换成你自己的 GitHub 仓库（用户名/仓库名）。
+ * 配置方式二选一：
+ *  1) 直接修改下方默认值；
+ *  2) 构建时设置环境变量 NEXT_PUBLIC_VERSION_CHECK_URL（会覆盖默认值）。
+ */
+const GITHUB_OWNER = 'shuatibao';      // TODO: 改成你的 GitHub 用户名
+const GITHUB_REPO = 'app';             // TODO: 改成你的仓库名
+
+const DEFAULT_VERSION_CHECK_URLS = [
+  // 主源：GitHub Raw（国外访问稳定）
+  `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/version.json`,
+  // 备用源：jsDelivr 镜像 GitHub 文件（国内访问更稳）
+  `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${GITHUB_REPO}@main/version.json`,
+];
+
+const ENV_VERSION_CHECK_URL = process.env.NEXT_PUBLIC_VERSION_CHECK_URL;
+const VERSION_CHECK_URLS = ENV_VERSION_CHECK_URL ? [ENV_VERSION_CHECK_URL] : DEFAULT_VERSION_CHECK_URLS;
+
+/** 启动自动检查的最小间隔（毫秒）：6 小时一次，避免每次启动都请求 */
+export const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 // localStorage key
 const LAST_CHECK_KEY = 'app_last_update_check';
@@ -28,19 +47,23 @@ export interface VersionInfo {
  * 获取远程版本信息
  */
 export async function checkForUpdate(): Promise<VersionInfo | null> {
-  try {
-    const response = await fetch(VERSION_CHECK_URL, {
-      cache: 'no-cache',
-      signal: AbortSignal.timeout(5000), // 5秒超时
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    // 基本校验
-    if (!data.version || !data.versionCode) return null;
-    return data as VersionInfo;
-  } catch {
-    return null; // 网络错误时静默失败
+  // 依次尝试多个检查源（GitHub Raw → jsDelivr 镜像）
+  for (const url of VERSION_CHECK_URLS) {
+    try {
+      const response = await fetch(url, {
+        cache: 'no-cache',
+        signal: AbortSignal.timeout(5000), // 5秒超时
+      });
+      if (!response.ok) continue;
+      const data = await response.json();
+      // 基本校验
+      if (!data.version || !data.versionCode) continue;
+      return data as VersionInfo;
+    } catch {
+      continue; // 该源失败，尝试下一个
+    }
   }
+  return null; // 所有源都失败
 }
 
 /**

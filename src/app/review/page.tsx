@@ -7,6 +7,7 @@ import { Question } from '@/types';
 import QuestionCard from '@/components/QuestionCard';
 import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
+import { useSwipeNav } from '@/lib/useSwipeNav';
 
 const labels = ['A', 'B', 'C', 'D'];
 
@@ -33,6 +34,8 @@ export default function ReviewPage() {
   const [completed, setCompleted] = useState(false);
   const [reviewedIds, setReviewedIds] = useState<string[]>([]);
   const [correctCount, setCorrectCount] = useState(0);
+  // 记录每题所选答案，用于滑动返回时恢复状态（滑动本身不显示答案）
+  const [answerMap, setAnswerMap] = useState<Record<string, number>>({});
 
   const handleSelect = useCallback((idx: number) => {
     if (showResult) return;
@@ -45,16 +48,29 @@ export default function ReviewPage() {
       setCorrectCount(prev => prev + 1);
       // 错题答对：更新重试计数
       retryWrongQuestion(q.id, true);
-      // 不会的题答对：可移出
     }
+    setAnswerMap(prev => ({ ...prev, [q.id]: idx }));
     setReviewedIds(prev => [...prev, q.id]);
   }, [showResult, reviewPool, currentIndex, retryWrongQuestion]);
 
-  const handleNext = useCallback(() => {
-    if (currentIndex < reviewPool.length - 1) {
-      setCurrentIndex(prev => prev + 1);
+  // 跳到指定题目：已作答的恢复状态，未作答保持未作答
+  const goToQuestion = useCallback((nextIndex: number) => {
+    if (nextIndex < 0 || nextIndex >= reviewPool.length) return;
+    const target = reviewPool[nextIndex];
+    const prevAnswer = answerMap[target.id];
+    setCurrentIndex(nextIndex);
+    if (prevAnswer !== undefined) {
+      setSelectedAnswer(prevAnswer);
+      setShowResult(true);
+    } else {
       setSelectedAnswer(null);
       setShowResult(false);
+    }
+  }, [reviewPool, answerMap]);
+
+  const handleNext = useCallback(() => {
+    if (currentIndex < reviewPool.length - 1) {
+      goToQuestion(currentIndex + 1);
     } else {
       // 完成复习
       const today = new Date().toISOString().split('T')[0];
@@ -65,12 +81,19 @@ export default function ReviewPage() {
       });
       setCompleted(true);
     }
-  }, [currentIndex, reviewPool.length, reviewedIds, addReviewRecord]);
+  }, [currentIndex, reviewPool.length, reviewedIds, addReviewRecord, goToQuestion]);
 
   const handleMastered = useCallback((questionId: string) => {
     removeWrongQuestion(questionId);
     removeConfusedQuestion(questionId);
   }, [removeWrongQuestion, removeConfusedQuestion]);
+
+  // 滑动手势：中间区左滑下一题/右滑上一题；左边距区左滑返回；右边距区右滑无效
+  const swipeRef = useSwipeNav<HTMLDivElement>({
+    onNext: () => goToQuestion(currentIndex + 1),
+    onPrev: () => goToQuestion(currentIndex - 1),
+    onLeftEdgeBack: () => router.back(),
+  });
 
   // 空状态
   if (reviewPool.length === 0) {
@@ -147,7 +170,7 @@ export default function ReviewPage() {
   const isConfused = confusedQuestions.includes(currentQ.id);
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-4">
+    <div ref={swipeRef} className="px-4 pt-6 pb-4 space-y-4">
       {/* 顶部 */}
       <div className="flex items-center gap-3">
         <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-600 min-w-[44px] min-h-[44px] flex items-center justify-center">

@@ -1,11 +1,12 @@
 {
   "name": "quiz-app",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:apk": "next build && npx cap sync && cd android && .\\gradlew.bat assembleDebug",
+    "build:apk": "next build && npx cap sync && cd android && .\\gradlew.bat assembleRelease",
+    "build:apk:debug": "next build && npx cap sync && cd android && .\\gradlew.bat assembleDebug",
     "cap:sync": "npx cap sync",
     "cap:open": "npx cap open android",
     "start": "next start",

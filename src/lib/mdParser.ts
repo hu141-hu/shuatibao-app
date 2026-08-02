@@ -64,7 +64,8 @@ function splitExplanation(text: string): { brief: string; detailed: string; know
 function answerToIndex(answer: string): number {
   const map: Record<string, number> = { 'A': 0, 'B': 1, 'C': 2, 'D': 3 };
   const upper = answer.trim().toUpperCase();
-  return map[upper] ?? 0;
+  // 无效答案返回 -1，由调用方跳过该题并提示，而不是静默当成 A
+  return map[upper] ?? -1;
 }
 
 /**
@@ -105,7 +106,7 @@ function parseRawQuestions(content: string): RawQuestion[] {
   let parsingExplanation = false;
 
   const flushCurrent = () => {
-    if (current && current.question && current.options.length >= 2 && current.answer) {
+    if (current && current.question && current.options.length > 0) {
       rawQuestions.push({ ...current });
     }
     current = null;
@@ -194,27 +195,63 @@ export function extractBankName(filename: string): string {
 /**
  * 解析 MD 文件内容为 Question 数组
  */
-export function parseMDFile(content: string, bankId: string): Question[] {
-  const rawQuestions = parseRawQuestions(content);
+export interface ParseWarning {
+  /** 题目序号（来自文件中的题号，无题号则为解析顺序） */
+  index: string;
+  /** 跳过原因 */
+  reason: string;
+}
 
-  return rawQuestions.map((raw, index) => {
+/**
+ * 解析 MD 文件内容为 Question 数组。
+ * 无效题目（答案缺失/非 A-D、选项超 4 个、选项不足）会被跳过并在 warnings 中说明，
+ * 不再静默使用默认答案。
+ */
+export function parseMDFile(content: string, bankId: string): { questions: Question[]; warnings: ParseWarning[] } {
+  const rawQuestions = parseRawQuestions(content);
+  const questions: Question[] = [];
+  const warnings: ParseWarning[] = [];
+
+  rawQuestions.forEach((raw, index) => {
     const num = extractQuestionNumber(raw.title) || String(index + 1);
-    return {
+    const reasons: string[] = [];
+
+    const answerIndex = answerToIndex(raw.answer);
+    if (answerIndex === -1) {
+      reasons.push(`答案“${raw.answer.trim() || '缺失'}”不是 A-D 单项`);
+    }
+    if (raw.options.length > 4) {
+      reasons.push(`选项 ${raw.options.length} 个（最多支持 4 个）`);
+    }
+    if (raw.options.length < 2) {
+      reasons.push('选项不足 2 个');
+    }
+    if (reasons.length > 0) {
+      warnings.push({ index: num, reason: reasons.join('；') });
+      return;
+    }
+
+    questions.push({
       id: `imported-${bankId}-${num}`,
       category: '常识判断',
       difficulty: 2,
       question: raw.question,
-      options: raw.options.slice(0, 4),
-      answer: answerToIndex(raw.answer),
+      options: raw.options,
+      answer: answerIndex,
       explanation: splitExplanation(raw.explanation),
-    };
+    });
   });
+
+  return { questions, warnings };
 }
 
 /**
  * 解析 MD 文件并返回题目数量和题目数组
  */
-export function parseMDContent(content: string, bankId: string): { questions: Question[]; count: number } {
-  const questions = parseMDFile(content, bankId);
-  return { questions, count: questions.length };
+export function parseMDContent(
+  content: string,
+  bankId: string
+): { questions: Question[]; count: number; warnings: ParseWarning[] } {
+  const { questions, warnings } = parseMDFile(content, bankId);
+  return { questions, count: questions.length, warnings };
 }

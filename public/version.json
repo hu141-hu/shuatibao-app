@@ -1,7 +1,7 @@
 {
-  "version": "1.1.0",
-  "versionCode": 11,
-  "downloadUrl": "https://github.com/shuatibao/app/releases/download/v1.1.0/app-release.apk",
-  "changelog": "v1.1.0 (2024-07-31)\n\n新功能：\n- 完整的在线自动更新功能\n- 优化版本检测逻辑\n- 改进更新弹窗 UI\n- 完善发布流程文档\n\n修复：\n- 修复版本号比较 bug\n- 优化导入速度",
+  "version": "1.2.0",
+  "versionCode": 12,
+  "downloadUrl": "https://github.com/shuatibao/app/releases/download/v1.2.0/app-release.apk",
+  "changelog": "v1.2.0 (2026-08-02)\n\n新功能：\n- 刷题页新增滑动手势：中间区域左滑下一题、右滑上一题；左边距区域左滑返回\n- 更新弹窗支持「稍后提醒」关闭\n- 启动时自动静默检查更新（每天最多提示一次）\n- 版本检测增加 jsDelivr 备用源，国内访问更稳定\n- 结果页新增分享成绩、未答计数\n\n优化：\n- 离线缓存升级：全路由预缓存、缓存名随版本更新\n- 导入题目增加校验，无效答案/选项不再静默导入\n- 允许页面缩放，优化无障碍\n\n修复：\n- 修复更新弹窗无法关闭的问题\n- 修复结果页「查看错题」跳转错误",
   "forceUpdate": false
 }

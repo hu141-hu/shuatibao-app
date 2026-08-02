@@ -7,9 +7,7 @@ import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/store';
 import ProgressRing from '@/components/ProgressRing';
 import ImportModal from '@/components/ImportModal';
-import UpdateModal from '@/components/UpdateModal';
 import { ImportedBank, Question } from '@/types';
-import { checkForUpdate, isNewerVersion, shouldShowPrompt, markPrompted, markChecked, VersionInfo } from '@/lib/updater';
 
 const categoryIcons: Record<string, string> = {
   '常识判断': '🌍',
@@ -28,8 +26,6 @@ export default function HomePage() {
   } = useStore();
   const { resolvedTheme, setTheme } = useTheme();
   const [showImportModal, setShowImportModal] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<VersionInfo | null>(null);
-  const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [expandedChapters, setExpandedChapters] = useState<Set<string>>(new Set());
 
   const handleImport = (bankName: string, qs: Question[], categoryId?: string, chapterId?: string, sectionId?: string, bankId?: string) => {
@@ -52,23 +48,6 @@ export default function HomePage() {
       router.replace('/account');
     }
   }, [currentUser, router]);
-
-  // 版本检测
-  useEffect(() => {
-    if (!currentUser) return;
-    const doCheck = async () => {
-      const info = await checkForUpdate();
-      markChecked();
-      if (info && isNewerVersion(info.version, '1.0.0') && shouldShowPrompt()) {
-        markPrompted();
-        setUpdateInfo(info);
-        setShowUpdateModal(true);
-      }
-    };
-    // 延迟 1 秒执行，不影响首屏加载
-    const timer = setTimeout(doCheck, 1000);
-    return () => clearTimeout(timer);
-  }, [currentUser]);
 
   const dailyProgress = progress.dailyGoal > 0 ? progress.todayCount / progress.dailyGoal : 0;
 
@@ -383,13 +362,6 @@ export default function HomePage() {
         onImport={handleImport}
       />
 
-      {/* 版本更新弹窗 */}
-      {updateInfo && (
-        <UpdateModal
-          isOpen={showUpdateModal}
-          versionInfo={updateInfo}
-        />
-      )}
     </div>
   );
 }

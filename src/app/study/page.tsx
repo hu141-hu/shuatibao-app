@@ -9,8 +9,16 @@ import QuestionCard from '@/components/QuestionCard';
 import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
 import FavoriteButton from '@/components/FavoriteButton';
+import { useSwipeNav } from '@/lib/useSwipeNav';
 
 const labels = ['A', 'B', 'C', 'D'];
+
+// 生成练习记录 ID（避免在事件处理器中使用 Math.random，满足 React 纯函数规则）
+let studySeq = 0;
+function nextPracticeId(): string {
+  studySeq += 1;
+  return `pr-${Date.now()}-${studySeq.toString(36)}`;
+}
 
 export default function StudyPage() {
   return (
@@ -58,16 +66,18 @@ function StudyContent() {
   const [showExplanation, setShowExplanation] = useState(false);
   const [answered, setAnswered] = useState(false);
   const [confusedAnim, setConfusedAnim] = useState(false);
-  const [questionStartTime, setQuestionStartTime] = useState(Date.now());
+  const [questionStartTime, setQuestionStartTime] = useState(() => Date.now());
 
   // URL参数支持
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化时根据 URL 参数同步选中状态
     const chId = searchParams.get('chapterId');
     const secId = searchParams.get('sectionId');
     const oldCategory = searchParams.get('category');
 
     if (secId) {
       const sec = categoryHierarchy.find(c => c.id === secId);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化时根据 URL 参数同步选中状态
       if (sec && sec.parentId) setSelectedChapterId(sec.parentId);
       setSelectedSectionId(secId);
       const qs = getQuestionsByCategoryId(secId);
@@ -119,9 +129,10 @@ function StudyContent() {
     recordAnswer(currentQ.id, isCorrect);
 
     // 记录刷题历史
+    // eslint-disable-next-line react-hooks/purity -- 事件处理器中记录作答用时
     const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
     const record: PracticeRecord = {
-      id: `pr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: nextPracticeId(),
       date: new Date().toISOString().split('T')[0],
       questionId: currentQ.id,
       userAnswer: optionIndex,
@@ -183,6 +194,14 @@ function StudyContent() {
       setSelectedChapterId(null);
     }
   };
+
+  // 滑动手势：中间区左滑下一题/右滑上一题；左边距区左滑返回；右边距区右滑无效
+  // 学习模式下滑动只翻题，不触发答题/不显示答案
+  const swipeRef = useSwipeNav<HTMLDivElement>({
+    onNext: handleNext,
+    onPrev: handlePrev,
+    onLeftEdgeBack: handleBack,
+  });
 
   // 章选择
   if (!selectedChapterId) {
@@ -288,11 +307,10 @@ function StudyContent() {
   }
 
   const currentQ = studyQuestions[currentIndex];
-  const isFavorite = progress.favoriteIds.includes(currentQ.id);
   const isConfused = confusedQuestions.includes(currentQ.id);
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-4">
+    <div ref={swipeRef} className="px-4 pt-6 pb-4 space-y-4">
       {/* 顶部栏 */}
       <div className="flex items-center gap-3">
         <button onClick={handleBack} className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">

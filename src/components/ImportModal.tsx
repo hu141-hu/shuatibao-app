@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useMemo } from 'react';
-import { parseMDContent, extractBankName } from '@/lib/mdParser';
+import { parseMDContent, extractBankName, ParseWarning } from '@/lib/mdParser';
 import { useStore } from '@/lib/store';
 import { Question } from '@/types';
 
@@ -17,6 +17,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
   const [fileName, setFileName] = useState('');
   const [fileContent, setFileContent] = useState('');
   const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
+  const [parseWarnings, setParseWarnings] = useState<ParseWarning[]>([]);
   const [currentBankId, setCurrentBankId] = useState('');
   const [bankName, setBankName] = useState('');
   const [resultMsg, setResultMsg] = useState('');
@@ -60,10 +61,15 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
 
       const bankId = `bank-${Date.now()}`;
       setCurrentBankId(bankId);
-      const { questions } = parseMDContent(text, bankId);
+      const { questions, warnings } = parseMDContent(text, bankId);
+      setParseWarnings(warnings);
 
       if (questions.length === 0) {
-        setResultMsg('未能从文件中解析出题目，请检查文件格式');
+        setResultMsg(
+          warnings.length > 0
+            ? `未能解析出有效题目（${warnings.length} 道被跳过：${warnings[0].reason}），请检查文件格式`
+            : '未能从文件中解析出题目，请检查文件格式'
+        );
         setResultType('error');
         setStep('result');
         return;
@@ -98,7 +104,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
 
     // 确定最终的 categoryId
     let finalChapterId = finalChapterId_raw;
-    let finalSectionId = finalSectionId_raw;
+    const finalSectionId = finalSectionId_raw;
 
     // Bug 6 修复：如果没有选择章，自动创建以题库名称命名的章
     if (!finalChapterId) {
@@ -119,7 +125,11 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
     }
 
     onImport(bankName || fileName, questions, categoryId, finalChapterId, finalSectionId, currentBankId);
-    setResultMsg(`成功导入 ${questions.length} 道题目！`);
+    setResultMsg(
+      parseWarnings.length > 0
+        ? `成功导入 ${questions.length} 道题目，跳过 ${parseWarnings.length} 道无效题（请检查原文件）`
+        : `成功导入 ${questions.length} 道题目！`
+    );
     setResultType('success');
     setStep('result');
   };
@@ -129,6 +139,7 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
     setFileName('');
     setFileContent('');
     setParsedQuestions([]);
+    setParseWarnings([]);
     setCurrentBankId('');
     setBankName('');
     setResultMsg('');
@@ -208,6 +219,25 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
                 解析出 {parsedQuestions.length} 道题目
               </p>
             </div>
+
+            {/* 解析警告（无效题不会被导入） */}
+            {parseWarnings.length > 0 && (
+              <div className="bg-amber-50 dark:bg-amber-900/30 rounded-2xl p-4 border border-amber-200 dark:border-amber-800">
+                <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1.5">
+                  ⚠️ {parseWarnings.length} 道题因以下原因被跳过（不会导入）：
+                </p>
+                <ul className="text-xs text-amber-700 dark:text-amber-300 space-y-1 max-h-28 overflow-y-auto">
+                  {parseWarnings.slice(0, 20).map((w, i) => (
+                    <li key={i}>
+                      第 {w.index} 题：{w.reason}
+                    </li>
+                  ))}
+                  {parseWarnings.length > 20 && (
+                    <li className="text-amber-500">还有 {parseWarnings.length - 20} 道...</li>
+                  )}
+                </ul>
+              </div>
+            )}
 
             {/* 题库名称编辑 */}
             <div>

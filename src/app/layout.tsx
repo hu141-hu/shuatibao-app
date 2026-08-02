@@ -3,6 +3,7 @@ import "./globals.css";
 import { StoreProvider, ThemeProvider } from "@/lib/store";
 import BottomNav from "@/components/BottomNav";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import UpdateChecker from "@/components/UpdateChecker";
 
 export const metadata: Metadata = {
   title: "刷题宝 - 智能刷题学习平台",
@@ -18,8 +19,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // 允许用户缩放，满足无障碍要求（不能写死 userScalable=false / maximumScale=1）
+  userScalable: true,
   themeColor: "#10B981",
   viewportFit: "cover",
 };
@@ -48,6 +49,7 @@ export default function RootLayout({
           </main>
           <BottomNav />
           <ServiceWorkerRegister />
+          <UpdateChecker />
           </StoreProvider>
         </ThemeProvider>
       </body>

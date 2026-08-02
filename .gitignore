@@ -46,3 +46,13 @@ android/.gradle/
 android/build/
 android/capacitor-cordova-android-plugins/build/
 android/local.properties
+
+# 签名密钥与密码（切勿提交到 GitHub）
+android/app/app-release-key.jks
+android/keystore.properties
+*.jks
+
+# OCR 本地资源（体积大，按需通过 scripts/download-ocr-assets.mjs 下载，不入库）
+/public/ocr/lang/
+/public/ocr/*.wasm
+/public/ocr/*.wasm.js

@@ -11,7 +11,7 @@ import UpdateModal from '@/components/UpdateModal';
 import InputModal from '@/components/InputModal';
 import DeleteConfirmModal from '@/components/DeleteConfirmModal';
 import { Question, ImportedBank } from '@/types';
-import { checkForUpdate, isNewerVersion, CURRENT_VERSION, VersionInfo } from '@/lib/updater';
+import { checkForUpdate, isNewerVersion, CURRENT_VERSION, markPrompted, VersionInfo } from '@/lib/updater';
 
 const PRESET_AVATARS: Record<string, string> = {
   fox: '🦊', cat: '🐱', dog: '🐶', rabbit: '🐰',
@@ -73,6 +73,7 @@ export default function ProfilePage() {
     if (info && isNewerVersion(info.version, CURRENT_VERSION)) {
       setUpdateInfo(info);
       setShowUpdateModal(true);
+      markPrompted(); // 当天不再重复提示
     } else {
       alert('当前已是最新版本');
     }
@@ -755,6 +756,7 @@ export default function ProfilePage() {
         <UpdateModal
           isOpen={showUpdateModal}
           versionInfo={updateInfo}
+          onClose={() => setShowUpdateModal(false)}
         />
       )}
 
