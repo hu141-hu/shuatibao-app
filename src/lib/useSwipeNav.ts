@@ -37,8 +37,7 @@ export function useSwipeNav<T extends HTMLElement = HTMLDivElement>({
   onLeftEdgeBack,
   enabled = true,
 }: UseSwipeNavOptions) {
-  const ref = useRef<T>(null);
-
+  const elementRef = useRef<T | null>(null);
   const touchStartRef = useRef<{ x: number; y: number; zone: SwipeZone } | null>(null);
 
   const onNextRef = useRef(onNext);
@@ -101,16 +100,35 @@ export function useSwipeNav<T extends HTMLElement = HTMLDivElement>({
     [enabled, minDistance, verticalSlop]
   );
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    el.addEventListener('touchstart', handleTouchStart, { passive: true });
-    el.addEventListener('touchend', handleTouchEnd, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', handleTouchStart);
-      el.removeEventListener('touchend', handleTouchEnd);
-    };
-  }, [handleTouchStart, handleTouchEnd]);
+  // 用回调 ref：元素随条件渲染切换（选题页 → 答题页）时，自动重新绑定/解绑监听器
+  const setRef = useCallback(
+    (el: T | null) => {
+      const prev = elementRef.current;
+      if (prev === el) return;
+      if (prev) {
+        prev.removeEventListener('touchstart', handleTouchStart);
+        prev.removeEventListener('touchend', handleTouchEnd);
+      }
+      elementRef.current = el;
+      if (el && enabled) {
+        el.addEventListener('touchstart', handleTouchStart, { passive: true });
+        el.addEventListener('touchend', handleTouchEnd, { passive: true });
+      }
+    },
+    [enabled, handleTouchStart, handleTouchEnd]
+  );
 
-  return ref;
+  // 卸载时清理监听器
+  useEffect(
+    () => () => {
+      const el = elementRef.current;
+      if (el) {
+        el.removeEventListener('touchstart', handleTouchStart);
+        el.removeEventListener('touchend', handleTouchEnd);
+      }
+    },
+    [handleTouchStart, handleTouchEnd]
+  );
+
+  return setRef;
 }
