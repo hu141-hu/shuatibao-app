@@ -25,7 +25,7 @@
 3. 点 **Create repository**，创建完成
 
 > 📌 记下你的"GitHub 用户名"和"仓库名"，后面所有地址都要用到。
-> 本文以用户名 `yourname`、仓库名 `shuatibao-app` 为例，请全部替换成你自己的。
+> 本文以用户名 `hu141-hu`、仓库名 `shuatibao-app` 为例。
 
 ---
 

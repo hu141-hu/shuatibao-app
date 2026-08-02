@@ -15,8 +15,8 @@ export const CURRENT_VERSION = packageJson.version || '1.0.0';
  *  1) 直接修改下方默认值；
  *  2) 构建时设置环境变量 NEXT_PUBLIC_VERSION_CHECK_URL（会覆盖默认值）。
  */
-const GITHUB_OWNER = 'shuatibao';      // TODO: 改成你的 GitHub 用户名
-const GITHUB_REPO = 'app';             // TODO: 改成你的仓库名
+const GITHUB_OWNER = 'hu141-hu';       // GitHub 用户名
+const GITHUB_REPO = 'shuatibao-app';   // GitHub 仓库名
 
 const DEFAULT_VERSION_CHECK_URLS = [
   // 主源：GitHub Raw（国外访问稳定）
