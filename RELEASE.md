@@ -23,13 +23,18 @@
 }
 ```
 
-#### b) public/version.json (客户端版本检测)
+#### b) version.json + public/version.json (客户端版本检测)
+
+⚠️ 有两个文件需要同步更新（内容保持一致）：
+- **仓库根目录 `version.json`**：App 在线检查更新的地址指向它（raw.githubusercontent.com/.../main/version.json）
+- **`public/version.json`**：随 App 打包内置的版本信息
+
 ```json
 {
-  "version": "1.1.0",          // 👈 更新此处（与 package.json 保持一致）
-  "versionCode": 11,           // 👈 数字版本号（v1.x.x → 1x）
-  "downloadUrl": "https://github.com/your-repo/shuatibao/releases/download/v1.1.0/app-release.apk",
-  "changelog": "v1.1.0 (2024-07-31)\n\n新功能：\n- 新增删除题库目录功能\n- 优化分类管理界面\n- 改进暗黑模式适配\n\n修复：\n- 修复 bankId 不一致导致的问题\n- 优化导入速度\n- 其他小优化",
+  "version": "1.1.0",          // 👈 两处都更新（与 package.json 保持一致）
+  "versionCode": 11,           // 👈 数字版本号
+  "downloadUrl": "https://github.com/hu141-hu/shuatibao-app/releases/download/v1.1.0/app-release.apk",
+  "changelog": "...",
   "forceUpdate": false
 }
 ```
