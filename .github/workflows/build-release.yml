@@ -30,7 +30,8 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          # 项目 source/target 兼容级别为 21（与本地打包环境一致）
+          java-version: 21
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
