@@ -66,8 +66,11 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
         const result = await recognizeImage(images[i], (p) => {
           setProgress(p);
         });
-        // 使用自动转换后的 Markdown 题目格式（## 题目 / - 选项 / **答案** / **解析**）
-        allTexts.push(result.markdown);
+        // 优先显示自动转换后的题目格式；若转换结果为空但原始文字存在，
+        // 退回原始文字，保证编辑框里永远有内容可看、可修正。
+        const text =
+          result.markdown && result.markdown.trim() ? result.markdown : result.text;
+        allTexts.push(text);
       } catch {
         failed += 1;
       }
@@ -323,6 +326,12 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
                     <p className="text-sm text-emerald-700 dark:text-emerald-400 font-medium">
                       解析出 {questions.length} 道题目
                     </p>
+                    {questions.length === 0 && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                        未识别出可导入的题目。可能原因：图片不够清晰、题号/选项排版特殊、或识别语言包未加载完成。
+                        建议：① 换一张更清晰、正对拍摄的图片重试；② 若下方文本框有文字，可手动修正后点「重新解析」。
+                      </p>
+                    )}
                     {parseWarnings.length > 0 && (
                       <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
                         ⚠️ {parseWarnings.length} 道题因答案/选项问题被跳过（识别文字中已标注，可编辑后重新解析）

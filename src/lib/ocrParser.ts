@@ -44,6 +44,7 @@ export function ocrToMarkdown(raw: string): string {
   let current: QPos | null = null;
   let pendingNum: number | null = null; // 孤行题号，等下一行题干
   let inExplanation = false;            // 是否处于当前题解析的续行状态
+  let hadBlankLine = false;             // 上一行是否为空行（无题号排版用空行区分题目）
 
   // 汇总块（答案/解析集中在页面底部）按题号暂存，最后回填
   const answerMap = new Map<number, string>();
@@ -120,22 +121,32 @@ export function ocrToMarkdown(raw: string): string {
 
   // —— 行级匹配规则 ——
   const QUESTION_RE = /^(\d{1,3})\s*[.、．)\uff09）]\s*(.*)$/;        // 1. / 1、 / 1) / 1） / 1．
+  const QUESTION_PAREN_RE = /^[\(（]\s*(\d{1,3})\s*[\)）]\s*(.*)$/;  // (1) / （1）
   const QUESTION_CN_RE = /^第\s*(\d{1,3})\s*题\s*[：:、.．]?\s*(.*)$/; // 第1题
   const OPTION_RE = /^[-*\s]*([A-Da-d])\s*[.、．)\uff09）:：]?\s*(.+)$/; // A. / A、 / A) / A 空格 / 无分隔符
   const EXPLANATION_RE = /^(?:【\s*)?(?:答案)?\s*(?:解析|解题思路|思路分析)\s*(?:\s*】)?\s*[：:]?\s*(.*)$/;
   const ANSWER_RE = /^(?:【\s*)?(?:(?:参考|正确)\s*)?答案\s*(?:\s*】)?\s*[：:]?\s*(.*)$/;
   // 噪音行：页码、纯数字、分隔线、URL
   const NOISE_RE = /^(?:第\s*\d+\s*页|共\s*\d+\s*页|\d+\s*\/\s*\d+|\d+|[-—~=*_#]{3,}|https?:\/\/\S+|.{0,2}[-—~=*_#]{3,}.{0,2})$/;
+  // 章节/标题行（不属于题目，跳过）：# 标题 / 一、 / 第X节 / （一）
+  const HEADER_RE = /^(?:#{1,6}\s*|[一二三四五六七八九十]+\s*[、.．]|第\s*[0-9一二三四五六七八九十]+\s*[章节部分课]|[\(（]\s*[一二三四五六七八九十]+\s*[\)）])/;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) {
       inExplanation = false;
+      hadBlankLine = true;
       continue;
     }
+    // 记录本行之前是否有空行（无题号排版用空行区分题目），随后重置
+    const afterBlank = hadBlankLine;
+    hadBlankLine = false;
 
     // 噪音行
     if (NOISE_RE.test(line)) continue;
+
+    // 章节/标题行（不属于题目）
+    if (HEADER_RE.test(line)) continue;
 
     // 解析行（必须先于答案判断，避免「答案解析」被误判为答案）
     let m = line.match(EXPLANATION_RE);
@@ -168,9 +179,19 @@ export function ocrToMarkdown(raw: string): string {
       continue;
     }
 
-    // 选项行
+    // 括号题号：(1) / （1）
+    m = line.match(QUESTION_PAREN_RE);
+    if (m) {
+      const text = m[2].trim();
+      if (text) current = beginQuestion(Number(m[1]), text);
+      else pendingNum = Number(m[1]);
+      continue;
+    }
+
+    // 选项行（无当前题时自动开题，避免内容被静默丢弃）
     m = line.match(OPTION_RE);
-    if (m && current) {
+    if (m) {
+      if (!current) current = beginQuestion(positions.length + 1, '（题干缺失，请补充）');
       const text = m[2].trim();
       const idx = out.length;
       out.push(`- ${m[1].toUpperCase()}. ${text}`);
@@ -186,13 +207,18 @@ export function ocrToMarkdown(raw: string): string {
     } else if (current) {
       if (inExplanation) {
         out.push(line); // 解析续行（mdParser 会并入当前解析）
+      } else if (current.lastOptionIdx >= 0 && afterBlank) {
+        current = beginQuestion(positions.length + 1, line); // 空行后新题干（无题号排版）
       } else if (current.lastOptionIdx >= 0) {
         out[current.lastOptionIdx] += line; // 选项换行续行
       } else {
         out[current.titleIdx] += line; // 题干续行
       }
+    } else if (line.length >= 4) {
+      // 无题号排版：像题干的行自动开题，避免整段内容被丢弃
+      current = beginQuestion(positions.length + 1, line);
     }
-    // 无当前题且无 pendingNum 的行：跳过（页面噪声）
+    // 其它无意义的行：跳过
   }
 
   // 回填汇总答案块/解析块（倒序处理，保持前面的索引有效）
