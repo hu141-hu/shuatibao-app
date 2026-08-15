@@ -8,6 +8,7 @@ import QuestionCard from '@/components/QuestionCard';
 import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
 import FavoriteButton from '@/components/FavoriteButton';
+import AiChat from '@/components/AiChat';
 import { useSwipeNav } from '@/lib/useSwipeNav';
 
 const labels = ['A', 'B', 'C', 'D'];
@@ -386,6 +387,15 @@ function QuizContent() {
           correctAnswer={`${labels[currentQ.answer]}. ${currentQ.options[currentQ.answer]}`}
           brief={currentQ.explanation.brief}
           mode="quiz"
+        />
+      )}
+
+      {/* AI 讲解与追问（手动触发，默认不调 AI） */}
+      {showResult && (
+        <AiChat
+          question={currentQ}
+          userAnswer={selectedAnswer}
+          correctAnswer={currentQ.answer}
         />
       )}
 

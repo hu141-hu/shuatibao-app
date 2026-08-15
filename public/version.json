@@ -1,7 +1,7 @@
 {
-  "version": "1.2.0",
-  "versionCode": 12,
-  "downloadUrl": "https://github.com/hu141-hu/shuatibao-app/releases/download/v1.2.0/app-release.apk",
-  "changelog": "v1.2.0 (2026-08-02)\n\n新功能：\n- 刷题页新增滑动手势：中间区域左滑下一题、右滑上一题；左边距区域左滑返回\n- 更新弹窗支持「稍后提醒」关闭\n- 启动时自动静默检查更新（每天最多提示一次）\n- 版本检测增加 jsDelivr 备用源，国内访问更稳定\n- 结果页新增分享成绩、未答计数\n\n优化：\n- 离线缓存升级：全路由预缓存、缓存名随版本更新\n- 导入题目增加校验，无效答案/选项不再静默导入\n- 允许页面缩放，优化无障碍\n\n修复：\n- 修复更新弹窗无法关闭的问题\n- 修复结果页「查看错题」跳转错误",
+  "version": "1.3.0",
+  "versionCode": 13,
+  "downloadUrl": "https://github.com/hu141-hu/shuatibao-app/releases/download/v1.3.0/app-release.apk",
+  "changelog": "v1.3.0 (2026-08-15)\n\n新功能：\n- 新增 AI 讲解：答完题点「✨ AI 讲解」，AI 返回正确答案与解析\n- 支持 AI 追问：讲解后可继续追问知识点，形成多轮对话\n- 社区新增「时政」Tab：内置近三年（2024-2026）公考/考编时政精华\n- 支持「AI 重新总结」时政\n\n说明：\n- AI 使用 deepseek-v4-flash；首次使用需在 App 内填写 DeepSeek API Key（保存在本机）",
   "forceUpdate": false
 }
