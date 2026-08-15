@@ -4,7 +4,7 @@
  * ⚠️ 发布新版本时，必须把 SW_VERSION 同步更新（与 public/version.json 的版本号一致），
  * 否则用户会一直停留在旧缓存页面。
  */
-const SW_VERSION = 'v1.3.1';
+const SW_VERSION = 'v1.3.2';
 
 const STATIC_CACHE = `shuati-static-${SW_VERSION}`;
 const RUNTIME_CACHE = `shuati-runtime-${SW_VERSION}`;

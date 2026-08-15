@@ -21,12 +21,14 @@ const GITHUB_REPO = 'shuatibao-app';   // GitHub 仓库名
 const DEFAULT_VERSION_CHECK_URLS = [
   // 主源：GitHub Raw（国外访问稳定）
   `https://raw.githubusercontent.com/${GITHUB_OWNER}/${GITHUB_REPO}/main/version.json`,
-  // 备用源：jsDelivr 镜像 GitHub 文件（国内访问更稳）
+  // 兜底源：jsDelivr 镜像 GitHub 文件（国内访问更稳，但最长有 12 小时 CDN 缓存）
   `https://cdn.jsdelivr.net/gh/${GITHUB_OWNER}/${GITHUB_REPO}@main/version.json`,
 ];
 
+// 实时权威源：GitHub Releases API（无 CDN 缓存，避免 jsDelivr 缓存旧版本导致检测不到更新）
+const GITHUB_RELEASES_API_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`;
+
 const ENV_VERSION_CHECK_URL = process.env.NEXT_PUBLIC_VERSION_CHECK_URL;
-const VERSION_CHECK_URLS = ENV_VERSION_CHECK_URL ? [ENV_VERSION_CHECK_URL] : DEFAULT_VERSION_CHECK_URLS;
 
 /** 启动自动检查的最小间隔（毫秒）：6 小时一次，避免每次启动都请求 */
 export const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -46,23 +48,80 @@ export interface VersionInfo {
 /**
  * 获取远程版本信息
  */
+async function fetchWithTimeout(url: string): Promise<unknown> {
+  const response = await fetch(url, {
+    cache: 'no-cache',
+    signal: AbortSignal.timeout(5000), // 5秒超时
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.json();
+}
+
+/** version.json 格式 → VersionInfo */
+function jsonToVersionInfo(data: unknown): VersionInfo | null {
+  const d = data as Partial<VersionInfo>;
+  if (!d || typeof d.version !== 'string' || !d.versionCode) return null;
+  return {
+    version: d.version,
+    versionCode: Number(d.versionCode),
+    downloadUrl: typeof d.downloadUrl === 'string' ? d.downloadUrl : '',
+    changelog: typeof d.changelog === 'string' ? d.changelog : '',
+    forceUpdate: d.forceUpdate === true,
+  };
+}
+
+/** GitHub Releases API 响应 → VersionInfo（实时、无 CDN 缓存） */
+function apiToVersionInfo(data: unknown): VersionInfo | null {
+  const d = data as {
+    tag_name?: string;
+    body?: string;
+    html_url?: string;
+    assets?: { name?: string; browser_download_url?: string }[];
+  };
+  if (!d || typeof d.tag_name !== 'string') return null;
+  const version = d.tag_name.replace(/^v/, '');
+  const parts = version.split('.').map(Number);
+  const versionCode = parts.length >= 2 ? parts[0] * 100 + parts[1] * 10 + (parts[2] || 0) : 0;
+  const asset = Array.isArray(d.assets)
+    ? d.assets.find((a) => a.name === 'app-release.apk') || d.assets[0]
+    : null;
+  return {
+    version,
+    versionCode,
+    downloadUrl: (asset && asset.browser_download_url) || d.html_url || '',
+    changelog: typeof d.body === 'string' ? d.body : '',
+    forceUpdate: false,
+  };
+}
+
 export async function checkForUpdate(): Promise<VersionInfo | null> {
-  // 依次尝试多个检查源（GitHub Raw → jsDelivr 镜像）
-  for (const url of VERSION_CHECK_URLS) {
+  // 环境变量配置的地址优先（version.json 格式）
+  if (ENV_VERSION_CHECK_URL) {
     try {
-      const response = await fetch(url, {
-        cache: 'no-cache',
-        signal: AbortSignal.timeout(5000), // 5秒超时
-      });
-      if (!response.ok) continue;
-      const data = await response.json();
-      // 基本校验
-      if (!data.version || !data.versionCode) continue;
-      return data as VersionInfo;
-    } catch {
-      continue; // 该源失败，尝试下一个
-    }
+      const vi = jsonToVersionInfo(await fetchWithTimeout(ENV_VERSION_CHECK_URL));
+      if (vi) return vi;
+    } catch { /* ignore */ }
+    return null;
   }
+
+  // 1) GitHub Raw（实时）
+  try {
+    const vi = jsonToVersionInfo(await fetchWithTimeout(DEFAULT_VERSION_CHECK_URLS[0]));
+    if (vi) return vi;
+  } catch { /* ignore */ }
+
+  // 2) GitHub Releases API（实时、含 APK 下载地址，防止 jsDelivr 缓存旧版本）
+  try {
+    const vi = apiToVersionInfo(await fetchWithTimeout(GITHUB_RELEASES_API_URL));
+    if (vi) return vi;
+  } catch { /* ignore */ }
+
+  // 3) jsDelivr 镜像（最后兜底）
+  try {
+    const vi = jsonToVersionInfo(await fetchWithTimeout(DEFAULT_VERSION_CHECK_URLS[1]));
+    if (vi) return vi;
+  } catch { /* ignore */ }
+
   return null; // 所有源都失败
 }
 
