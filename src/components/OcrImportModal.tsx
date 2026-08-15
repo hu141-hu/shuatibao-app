@@ -66,7 +66,8 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
         const result = await recognizeImage(images[i], (p) => {
           setProgress(p);
         });
-        allTexts.push(result.text);
+        // 使用自动转换后的 Markdown 题目格式（## 题目 / - 选项 / **答案** / **解析**）
+        allTexts.push(result.markdown);
       } catch {
         failed += 1;
       }
@@ -237,7 +238,7 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
                 <ul className="text-xs text-gray-500 dark:text-slate-400 space-y-0.5 list-disc list-inside">
                   <li>支持拍照或从相册选择题目图片</li>
                   <li>确保题目文字清晰可见</li>
-                  <li>识别后可手动编辑修正文字</li>
+                  <li>识别后自动转换成可导入的题目格式，也可手动编辑修正</li>
                 </ul>
               </div>
             </>
@@ -301,7 +302,7 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
                 <>
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <label className="text-sm text-gray-600 dark:text-slate-400 font-medium">识别文本（可编辑）</label>
+                      <label className="text-sm text-gray-600 dark:text-slate-400 font-medium">已自动转为题目格式（可编辑）</label>
                       <button
                         onClick={handleReparse}
                         className="text-xs text-emerald-600 hover:text-emerald-700 font-medium px-2 py-1 rounded-lg hover:bg-emerald-50"
