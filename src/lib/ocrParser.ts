@@ -268,8 +268,14 @@ export async function recognizeImage(
       }
     },
   });
-  const result = await worker.recognize(imageFile);
-  await worker.terminate();
+  let result: Awaited<ReturnType<typeof worker.recognize>> | null = null;
+  try {
+    result = await worker.recognize(imageFile);
+  } finally {
+    // 识别失败/抛错时也要释放 worker，否则多张图片连续失败会堆积大量 worker 线程
+    await worker.terminate();
+  }
+  if (!result) throw new Error('OCR 识别失败');
 
   const rawText = result.data.text;
   const markdown = ocrToMarkdown(rawText);

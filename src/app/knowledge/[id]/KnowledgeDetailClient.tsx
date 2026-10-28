@@ -6,6 +6,7 @@ import { useStore } from '@/lib/store';
 import { getQuestionById } from '@/data/questions';
 
 const categoryColors: Record<string, { bg: string; text: string }> = {
+  '教育学': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
   '常识判断': { bg: 'bg-blue-50', text: 'text-blue-600' },
   '逻辑推理': { bg: 'bg-purple-50', text: 'text-purple-600' },
   '言语理解': { bg: 'bg-green-50', text: 'text-green-600' },

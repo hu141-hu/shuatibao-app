@@ -10,6 +10,8 @@ import AddQuestionModal from '@/components/AddQuestionModal';
 import UpdateModal from '@/components/UpdateModal';
 import InputModal from '@/components/InputModal';
 import DeleteConfirmModal from '@/components/DeleteConfirmModal';
+import CategoryQuestionPicker from '@/components/CategoryQuestionPicker';
+import { getCategoryStats } from '@/lib/categoryUtils';
 import { Question, ImportedBank } from '@/types';
 import { checkForUpdate, isNewerVersion, CURRENT_VERSION, markPrompted, VersionInfo } from '@/lib/updater';
 
@@ -25,7 +27,7 @@ export default function ProfilePage() {
     importedBanks, addImportedQuestions, removeImportedBank,
     customQuestions, addCustomQuestion,
     wrongQuestions, confusedQuestions, todayReviewCount,
-    allQuestions,
+    allQuestions, practiceHistory,
     categoryHierarchy, addCategory, removeCategory, updateCategory,
   } = useStore();
   const { theme, setTheme } = useTheme();
@@ -57,6 +59,89 @@ export default function ProfilePage() {
     mode: 'input' | 'confirm';
     onConfirm: (value: string) => void;
   }>({ isOpen: false, title: '', mode: 'input', onConfirm: () => {} });
+
+  // 题目归入目录弹窗
+  const [questionPicker, setQuestionPicker] = useState<{ id: string; name: string } | null>(null);
+  // 导入题库弹窗：id 为空表示不锁定目录（顶部“导入题库”）
+  const [importTarget, setImportTarget] = useState<{ id: string; name: string } | null>(null);
+
+  // 同级目录上移/下移：用连续 order 重排，避免历史 order 重复导致交换无效
+  const moveCategory = (id: string, dir: -1 | 1) => {
+    const cat = categoryHierarchy.find(c => c.id === id);
+    if (!cat) return;
+    const siblings = categoryHierarchy
+      .filter(c => c.parentId === cat.parentId && c.level === cat.level)
+      .sort((a, b) => a.order - b.order);
+    const idx = siblings.findIndex(c => c.id === id);
+    const targetIdx = idx + dir;
+    if (idx < 0 || targetIdx < 0 || targetIdx >= siblings.length) return;
+    const reordered = [...siblings];
+    [reordered[idx], reordered[targetIdx]] = [reordered[targetIdx], reordered[idx]];
+    reordered.forEach((c, i) => {
+      if (c.order !== i) updateCategory(c.id, { order: i });
+    });
+  };
+
+  // 目录节点右侧的统一操作按钮
+  const renderNodeActions = (id: string, name: string, parentId: string | null, level: 'chapter' | 'section' | 'knowledge') => (
+    <div className="flex items-center gap-0.5 shrink-0">
+      <button
+        onClick={() => setImportTarget({ id, name })}
+        className="w-7 h-7 rounded-full flex items-center justify-center text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+        title="导入题库到此目录"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+        </svg>
+      </button>
+      {level !== 'knowledge' && (
+        <button
+          onClick={() => {
+            const childLevel = level === 'chapter' ? 'section' : 'knowledge';
+            openInputModal(
+              level === 'chapter' ? `在“${name}”下新建节` : `在“${name}”下新建知识点`,
+              '',
+              level === 'chapter' ? '输入节名称' : '输入知识点名称',
+              (v) => {
+                closeModal();
+                if (v && v.trim()) addCategory(v.trim(), id, childLevel);
+              }
+            );
+          }}
+          className="w-7 h-7 rounded-full flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+          title={level === 'chapter' ? '新建节' : '新建知识点'}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+        </button>
+      )}
+      <button
+        onClick={() => {
+          openInputModal(`修改${level === 'chapter' ? '章' : level === 'section' ? '节' : '知识点'}标题`, name, '输入新标题', (v) => {
+            closeModal();
+            if (v && v.trim()) updateCategory(id, { name: v.trim() });
+          });
+        }}
+        className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700"
+        title="修改标题"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+      </button>
+      <button onClick={() => moveCategory(id, -1)} className="w-6 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700" title="上移">↑</button>
+      <button onClick={() => moveCategory(id, 1)} className="w-6 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700" title="下移">↓</button>
+      <button
+        onClick={() => {
+          openConfirmModal('删除目录', `确定删除“${name}”及其所有子目录吗？题目本身不会被删除。`, () => {
+            closeModal();
+            removeCategory(id);
+          });
+        }}
+        className="w-7 h-7 rounded-full flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+        title="删除"
+      >
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+      </button>
+    </div>
+  );
 
   const openInputModal = (title: string, defaultValue: string, placeholder: string, onConfirm: (v: string) => void) => {
     setModalState({ isOpen: true, title, defaultValue, placeholder, mode: 'input', onConfirm });
@@ -92,10 +177,20 @@ export default function ProfilePage() {
     ? Math.round((progress.totalCorrect / progress.totalCount) * 100)
     : 0;
 
+  // 每次进入编辑都用最新的 dailyGoal 回填：goalInput 只在初始挂载时赋值一次，
+  // 而 progress 是异步从 localStorage 加载的，直接用会拿默认值 20 覆盖用户真实设置
+  const handleEditGoal = () => {
+    setGoalInput(progress.dailyGoal.toString());
+    setEditingGoal(true);
+  };
+
   const handleSaveGoal = () => {
     const goal = parseInt(goalInput);
-    if (goal > 0 && goal <= 200) {
+    if (Number.isFinite(goal) && goal > 0 && goal <= 200) {
       setDailyGoal(goal);
+    } else {
+      // 非法输入不静默丢弃，还原为当前生效值
+      setGoalInput(progress.dailyGoal.toString());
     }
     setEditingGoal(false);
   };
@@ -128,107 +223,101 @@ export default function ProfilePage() {
         </button>
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-gray-800 dark:text-slate-200">📚 题库分类管理</h2>
-          <button
-            onClick={() => {
-              openInputModal('新建章', '', '输入新章名称', (name) => {
-                closeModal();
-                if (name && name.trim()) addCategory(name.trim(), null, 'chapter');
-              });
-            }}
-            className="px-3 py-1.5 bg-emerald-500 text-white text-sm rounded-lg hover:bg-emerald-600"
-          >
-            + 新建章
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setImportTarget({ id: '', name: '' })}
+              className="px-3 py-1.5 bg-violet-500 text-white text-sm rounded-lg hover:bg-violet-600"
+            >
+              📥 导入
+            </button>
+            <button
+              onClick={() => {
+                openInputModal('新建章', '', '输入新章名称', (name) => {
+                  closeModal();
+                  if (name && name.trim()) addCategory(name.trim(), null, 'chapter');
+                });
+              }}
+              className="px-3 py-1.5 bg-emerald-500 text-white text-sm rounded-lg hover:bg-emerald-600"
+            >
+              + 新建章
+            </button>
+          </div>
         </div>
         <div className="space-y-3">
           {chapters.map((ch) => {
             const sections = categoryHierarchy
               .filter(c => c.level === 'section' && c.parentId === ch.id)
               .sort((a, b) => a.order - b.order);
+            const chStats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, ch.id);
             return (
               <div key={ch.id} className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex-1">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="w-1 h-5 bg-emerald-500 rounded-full" />
-                      <h3 className="font-semibold text-gray-800 dark:text-slate-200">{ch.name}</h3>
+                      <span className="w-1 h-5 bg-emerald-500 rounded-full shrink-0" />
+                      <h3 className="font-semibold text-gray-800 dark:text-slate-200 truncate">{ch.name}</h3>
                     </div>
-                    <p className="text-xs text-gray-400 mt-1 ml-3">{ch.questionIds.length} 道题 · {sections.length} 个节</p>
-                  </div>
-                  <div className="flex items-center gap-1">
                     <button
-                      onClick={() => {
-                        openInputModal(`在“${ch.name}”下新建节`, '', '输入节名称', (name) => {
-                          closeModal();
-                          if (name && name.trim()) addCategory(name.trim(), ch.id, 'section');
-                        });
-                      }}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-                      title="新建节"
+                      onClick={() => setQuestionPicker({ id: ch.id, name: ch.name })}
+                      className="text-xs text-gray-400 mt-1 ml-3 hover:text-emerald-500"
+                      title="添加题目到本章"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    </button>
-                    <button
-                      onClick={() => {
-                        openInputModal('修改章名称', ch.name, '输入新名称', (newName) => {
-                          closeModal();
-                          if (newName && newName.trim()) updateCategory(ch.id, { name: newName.trim() });
-                        });
-                      }}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-700"
-                      title="编辑"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                    </button>
-                    <button
-                      onClick={() => {
-                        openConfirmModal('删除章', `确定删除章“${ch.name}”及其所有节吗？`, () => {
-                          closeModal();
-                          removeCategory(ch.id);
-                        });
-                      }}
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-                      title="删除"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      {chStats.done}/{chStats.total} 题 · {sections.length} 个节 · 管理题目
                     </button>
                   </div>
+                  {renderNodeActions(ch.id, ch.name, null, 'chapter')}
                 </div>
+
                 {sections.length > 0 && (
-                  <div className="ml-4 space-y-1.5 mt-2">
-                    {sections.map((sec) => (
-                      <div key={sec.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 dark:bg-slate-700/50 rounded-xl">
-                        <div className="flex items-center gap-2 flex-1">
-                          <span className="w-1 h-4 bg-blue-500 rounded-full" />
-                          <span className="text-sm text-gray-700 dark:text-slate-300">{sec.name}</span>
-                          <span className="text-xs text-gray-400">{sec.questionIds.length} 题</span>
+                  <div className="ml-4 mt-2 pl-3 border-l-2 border-blue-100 dark:border-blue-900/40 space-y-2">
+                    {sections.map((sec) => {
+                      const knowledges = categoryHierarchy
+                        .filter(c => c.level === 'knowledge' && c.parentId === sec.id)
+                        .sort((a, b) => a.order - b.order);
+                      const secStats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, sec.id);
+                      return (
+                        <div key={sec.id}>
+                          <div className="flex items-center justify-between gap-2 py-1">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className="w-1 h-4 bg-blue-500 rounded-full shrink-0" />
+                              <button
+                                onClick={() => setQuestionPicker({ id: sec.id, name: sec.name })}
+                                className="text-sm text-gray-700 dark:text-slate-300 truncate hover:text-emerald-500"
+                                title="添加题目到此节"
+                              >
+                                {sec.name}
+                              </button>
+                              <span className="text-xs text-gray-400 shrink-0">{secStats.done}/{secStats.total}</span>
+                            </div>
+                            {renderNodeActions(sec.id, sec.name, ch.id, 'section')}
+                          </div>
+
+                          {knowledges.length > 0 && (
+                            <div className="ml-4 mt-1 pl-3 border-l-2 border-purple-100 dark:border-purple-900/40 space-y-1">
+                              {knowledges.map((kn) => {
+                                const knStats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, kn.id);
+                                return (
+                                  <div key={kn.id} className="flex items-center justify-between gap-2 py-1">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <span className="w-1 h-3 bg-purple-400 rounded-full shrink-0" />
+                                      <button
+                                        onClick={() => setQuestionPicker({ id: kn.id, name: kn.name })}
+                                        className="text-sm text-gray-600 dark:text-slate-400 truncate hover:text-emerald-500"
+                                        title="添加题目到此知识点"
+                                      >
+                                        {kn.name}
+                                      </button>
+                                      <span className="text-xs text-gray-400 shrink-0">{knStats.done}/{knStats.total}</span>
+                                    </div>
+                                    {renderNodeActions(kn.id, kn.name, sec.id, 'knowledge')}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => {
-                              openInputModal('修改节名称', sec.name, '输入新名称', (newName) => {
-                                closeModal();
-                                if (newName && newName.trim()) updateCategory(sec.id, { name: newName.trim() });
-                              });
-                            }}
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-gray-400 hover:bg-white dark:hover:bg-slate-600"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-                          </button>
-                          <button
-                            onClick={() => {
-                              openConfirmModal('删除节', `确定删除节“${sec.name}”吗？`, () => {
-                                closeModal();
-                                removeCategory(sec.id);
-                              });
-                            }}
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-red-400 hover:bg-white dark:hover:bg-slate-600"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -247,6 +336,26 @@ export default function ProfilePage() {
           onConfirm={(v) => { modalState.onConfirm(v); }}
           onCancel={closeModal}
         />
+
+        {questionPicker && (
+          <CategoryQuestionPicker
+            isOpen
+            categoryId={questionPicker.id}
+            categoryName={questionPicker.name}
+            onClose={() => setQuestionPicker(null)}
+          />
+        )}
+
+        {importTarget && (
+          <ImportModal
+            key={importTarget.id || 'free-import'}
+            isOpen
+            onClose={() => setImportTarget(null)}
+            onImport={handleImport}
+            targetCategoryId={importTarget.id || undefined}
+            targetCategoryName={importTarget.name || undefined}
+          />
+        )}
       </div>
     );
   }
@@ -625,7 +734,7 @@ export default function ProfilePage() {
               <button onClick={handleSaveGoal} className="ml-auto text-sm text-emerald-600 dark:text-emerald-400 font-medium">保存</button>
             </div>
           ) : (
-            <button onClick={() => setEditingGoal(true)} className="w-full flex items-center justify-between min-h-[44px]">
+            <button onClick={handleEditGoal} className="w-full flex items-center justify-between min-h-[44px]">
               <div className="flex items-center gap-3">
                 <span className="text-lg">🎯</span>
                 <span className="text-sm text-gray-700 dark:text-slate-200">每日目标</span>

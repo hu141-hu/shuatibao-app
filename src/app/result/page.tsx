@@ -3,7 +3,9 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useStore } from '@/lib/store';
+import { getCategoryStats } from '@/lib/categoryUtils';
 
 export default function ResultPage() {
   return (
@@ -15,16 +17,39 @@ export default function ResultPage() {
 
 function ResultContent() {
   const searchParams = useSearchParams();
+  const { categoryHierarchy, allQuestions, practiceHistory, progress } = useStore();
   const [shareState, setShareState] = useState<'idle' | 'done' | 'error'>('idle');
 
-  const total = parseInt(searchParams.get('total') || '0');
-  const correct = parseInt(searchParams.get('correct') || '0');
-  const wrong = parseInt(searchParams.get('wrong') || '0');
-  const unanswered = parseInt(searchParams.get('unanswered') || '0');
-  const timeSpent = parseInt(searchParams.get('time') || '0');
+  // URL 参数可被手改/分享截断，parseInt 得到 NaN 会让正确率显示 NaN%、进度圈 strokeDashoffset 变 NaN
+  const readInt = (key: string) => {
+    const n = parseInt(searchParams.get(key) || '0');
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const total = readInt('total');
+  const correct = readInt('correct');
+  const wrong = readInt('wrong');
+  const unanswered = readInt('unanswered');
+  const timeSpent = readInt('time');
   const category = searchParams.get('category') || '';
+  const categoryId = searchParams.get('categoryId') || '';
+  const fromHome = searchParams.get('from') === 'home';
 
   const accuracy = total > 0 ? Math.round((correct / total) * 100) : 0;
+  const historyAccuracy = progress.totalCount > 0
+    ? Math.round((progress.totalCorrect / progress.totalCount) * 100)
+    : 0;
+
+  // 薄弱环节：优先看本次所在目录的子目录，否则看全部节；按正确率升序取 3 个
+  const weakCategories = useMemo(() => {
+    const parents = categoryId && categoryHierarchy.some(c => c.id === categoryId)
+      ? categoryHierarchy.filter(c => c.parentId === categoryId)
+      : categoryHierarchy.filter(c => c.level === 'section');
+    return parents
+      .map(c => ({ cat: c, stats: getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, c.id) }))
+      .filter(r => r.stats.done > 0)
+      .sort((a, b) => a.stats.accuracy - b.stats.accuracy)
+      .slice(0, 3);
+  }, [categoryId, categoryHierarchy, allQuestions, practiceHistory]);
   const minutes = Math.floor(timeSpent / 60);
   const seconds = timeSpent % 60;
 
@@ -113,10 +138,46 @@ function ResultContent() {
         </div>
       </div>
 
+      {/* 与累计平均对比 */}
+      <div className="bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700 flex items-center justify-between">
+        <span className="text-sm text-gray-500 dark:text-slate-400">累计平均正确率</span>
+        <span className="text-sm font-semibold text-gray-800 dark:text-slate-200">
+          {historyAccuracy}%
+          <span className={`ml-2 text-xs ${accuracy >= historyAccuracy ? 'text-emerald-500' : 'text-amber-500'}`}>
+            {accuracy >= historyAccuracy ? `+${accuracy - historyAccuracy}` : `${accuracy - historyAccuracy}`}
+          </span>
+        </span>
+      </div>
+
+      {/* 薄弱环节（点击直达对应目录） */}
+      {weakCategories.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium text-gray-500 dark:text-slate-400 px-1">薄弱环节</h3>
+          {weakCategories.map(({ cat, stats }) => {
+            const href = cat.level === 'chapter' ? `/quiz?chapterId=${cat.id}`
+              : cat.level === 'section' ? `/quiz?sectionId=${cat.id}`
+              : `/quiz?knowledgeId=${cat.id}`;
+            return (
+              <Link
+                key={cat.id}
+                href={href}
+                className="flex items-center justify-between bg-white dark:bg-slate-800 rounded-xl px-4 py-3 border border-gray-100 dark:border-slate-700"
+              >
+                <span className="text-sm text-gray-700 dark:text-slate-300 truncate">{cat.name}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-amber-600 dark:text-amber-400">{stats.accuracy}%（{stats.done}/{stats.total}）</span>
+                  <span className="text-xs text-gray-400">去刷 →</span>
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
       {/* 操作按钮 */}
       <div className="space-y-3">
         <Link
-          href={`/quiz${category ? `?category=${encodeURIComponent(category)}` : ''}`}
+          href={fromHome ? '/' : `/quiz${category ? `?category=${encodeURIComponent(category)}` : ''}`}
           className="block w-full min-h-[52px] bg-emerald-500 text-white font-semibold rounded-xl text-center leading-[52px] hover:bg-emerald-600 transition-colors shadow-md"
         >
           🔄 再来一轮

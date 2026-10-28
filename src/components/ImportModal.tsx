@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo } from 'react';
 import { parseMDContent, extractBankName, ParseWarning } from '@/lib/mdParser';
+import { getCategoryPath } from '@/lib/categoryUtils';
 import { useStore } from '@/lib/store';
 import { Question } from '@/types';
 
@@ -9,10 +10,18 @@ interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (bankName: string, questions: Question[], categoryId?: string, chapterId?: string, sectionId?: string, bankId?: string) => void;
+  /** 从目录管理进入时锁定目标目录（章/节/知识点），不再让用户选分类 */
+  targetCategoryId?: string;
+  targetCategoryName?: string;
 }
 
-export default function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
+export default function ImportModal({ isOpen, onClose, onImport, targetCategoryId, targetCategoryName }: ImportModalProps) {
   const { categoryHierarchy, addCategory } = useStore();
+
+  const targetCat = targetCategoryId ? categoryHierarchy.find(c => c.id === targetCategoryId) : undefined;
+  const targetChapter = targetCategoryId
+    ? getCategoryPath(categoryHierarchy, targetCategoryId).find(c => c.level === 'chapter')
+    : undefined;
   const [step, setStep] = useState<'select' | 'preview' | 'result'>('select');
   const [fileName, setFileName] = useState('');
   const [fileContent, setFileContent] = useState('');
@@ -88,6 +97,32 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
   };
 
   const handleConfirmImport = () => {
+    // 从目录行的“导入”按钮进入：锁定目标目录，不再走分类推断
+    if (targetCategoryId) {
+      if (parsedQuestions.length === 0) {
+        setResultMsg('导入失败，未找到有效题目');
+        setResultType('error');
+        setStep('result');
+        return;
+      }
+      onImport(
+        bankName || fileName,
+        parsedQuestions,
+        targetCategoryId,
+        targetChapter?.id || targetCategoryId,
+        targetCat?.level === 'section' ? targetCat.id : undefined,
+        currentBankId
+      );
+      setResultMsg(
+        parseWarnings.length > 0
+          ? `成功导入 ${parsedQuestions.length} 道题目，跳过 ${parseWarnings.length} 道无效题（请检查原文件）`
+          : `成功导入 ${parsedQuestions.length} 道题目！`
+      );
+      setResultType('success');
+      setStep('result');
+      return;
+    }
+
     // 处理新建章
     let finalChapterId_raw = selectedChapterId;
     if (showNewChapter && newChapterName.trim()) {
@@ -251,8 +286,18 @@ export default function ImportModal({ isOpen, onClose, onImport }: ImportModalPr
               />
             </div>
 
+            {/* 分类：从目录进入时锁定目标，不再让用户选 */}
+            {targetCategoryId && (
+              <div className="bg-blue-50 dark:bg-blue-900/30 rounded-2xl p-3">
+                <p className="text-xs text-gray-500 dark:text-slate-400">导入到</p>
+                <p className="text-sm font-medium text-blue-700 dark:text-blue-300 mt-0.5">
+                  {targetCategoryName || targetCat?.name || '指定目录'}
+                </p>
+              </div>
+            )}
+
             {/* 分类选择 */}
-            <div className="space-y-3">
+            <div className={`space-y-3 ${targetCategoryId ? 'hidden' : ''}`}>
               <label className="text-sm font-medium text-gray-700 dark:text-slate-300 block">📁 所属分类</label>
 
               {/* 章选择 */}

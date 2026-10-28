@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import { Question } from '@/types';
@@ -8,7 +8,13 @@ import QuestionCard from '@/components/QuestionCard';
 import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
 
-const labels = ['A', 'B', 'C', 'D'];
+import {
+  OPTION_LABELS as labels,
+  isMultiQuestion,
+  checkAnswer,
+  correctIndices,
+  answerText,
+} from '@/lib/answerUtils';
 const CATEGORIES = ['全部', '常识判断', '逻辑推理', '言语理解', '数量关系'];
 
 export default function WrongQuestionsPage() {
@@ -17,6 +23,8 @@ export default function WrongQuestionsPage() {
   const [selectedCategory, setSelectedCategory] = useState('全部');
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  // 多选题勾选项
+  const [multiSelected, setMultiSelected] = useState<number[]>([]);
   const [showResult, setShowResult] = useState(false);
 
   const wrongWithDetails = useMemo(() => {
@@ -33,17 +41,41 @@ export default function WrongQuestionsPage() {
     return wrongWithDetails.filter(w => w.question.category === selectedCategory);
   }, [wrongWithDetails, selectedCategory]);
 
+  // 答对 2 次后错题会自动移出错题本，此时 retryingId 指向的题目已不存在；
+  // 原来直接在渲染里 setState（会触发 React 警告并有可能死循环），改到 effect 里复位
+  useEffect(() => {
+    if (retryingId && !wrongWithDetails.some(w => w.questionId === retryingId)) {
+      setRetryingId(null);
+      setSelectedAnswer(null);
+      setShowResult(false);
+    }
+  }, [retryingId, wrongWithDetails]);
+
   // 重做模式
   if (retryingId) {
     const item = wrongWithDetails.find(w => w.questionId === retryingId);
-    if (!item) { setRetryingId(null); return null; }
+    if (!item) return null;
     const q = item.question;
 
     const handleRetrySelect = (idx: number) => {
       if (showResult) return;
+      // 多选题：先勾选，提交后判分
+      if (isMultiQuestion(q)) {
+        setMultiSelected(prev =>
+          prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx]
+        );
+        return;
+      }
       setSelectedAnswer(idx);
       setShowResult(true);
       const isCorrect = idx === q.answer;
+      retryWrongQuestion(q.id, isCorrect);
+    };
+
+    const handleRetrySubmitMulti = () => {
+      if (showResult || multiSelected.length === 0) return;
+      const isCorrect = checkAnswer(q, multiSelected);
+      setShowResult(true);
       retryWrongQuestion(q.id, isCorrect);
     };
 
@@ -65,23 +97,42 @@ export default function WrongQuestionsPage() {
         <QuestionCard question={q} index={0} total={1} />
 
         <div className="space-y-2.5">
-          {q.options.map((opt, idx) => (
-            <OptionButton
-              key={idx}
-              label={labels[idx]}
-              text={opt}
-              correct={showResult && idx === q.answer}
-              wrong={showResult && idx === selectedAnswer && idx !== q.answer}
-              disabled={showResult}
-              onClick={() => handleRetrySelect(idx)}
-            />
-          ))}
+          {q.options.map((opt, idx) => {
+            const isMulti = isMultiQuestion(q);
+            const correctSet = correctIndices(q);
+            const isCorrectOpt = correctSet.includes(idx);
+            const picked = isMulti ? multiSelected.includes(idx) : idx === selectedAnswer;
+            return (
+              <OptionButton
+                key={idx}
+                label={labels[idx]}
+                text={opt}
+                correct={showResult && isCorrectOpt}
+                wrong={showResult && !isMulti && idx === selectedAnswer && !isCorrectOpt}
+                selected={!showResult && picked}
+                disabled={showResult}
+                onClick={() => handleRetrySelect(idx)}
+              />
+            );
+          })}
         </div>
+
+        {isMultiQuestion(q) && !showResult && (
+          <button
+            onClick={handleRetrySubmitMulti}
+            disabled={multiSelected.length === 0}
+            className="w-full min-h-[48px] bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors shadow-md disabled:opacity-40"
+          >
+            提交答案（已选 {multiSelected.length} 项）
+          </button>
+        )}
 
         {showResult && (
           <ExplanationPanel
-            correct={selectedAnswer === q.answer}
-            correctAnswer={`${labels[q.answer]}. ${q.options[q.answer]}`}
+            correct={isMultiQuestion(q)
+              ? checkAnswer(q, multiSelected)
+              : selectedAnswer === q.answer}
+            correctAnswer={answerText(q)}
             brief={q.explanation.brief}
             detailed={q.explanation.detailed}
             mode="quiz"
@@ -150,7 +201,7 @@ export default function WrongQuestionsPage() {
                 </div>
                 <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed line-clamp-2">{q.question}</p>
                 <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
-                  正确答案：{labels[q.answer]}. {q.options[q.answer]}
+                  正确答案：{answerText(q)}
                 </div>
                 <div className="flex gap-2 mt-3">
                   <button

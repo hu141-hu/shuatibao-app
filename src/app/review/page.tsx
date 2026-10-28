@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import { Question } from '@/types';
@@ -9,7 +9,13 @@ import OptionButton from '@/components/OptionButton';
 import ExplanationPanel from '@/components/ExplanationPanel';
 import { useSwipeNav } from '@/lib/useSwipeNav';
 
-const labels = ['A', 'B', 'C', 'D'];
+import {
+  OPTION_LABELS as labels,
+  isMultiQuestion,
+  checkAnswer,
+  correctIndices,
+  answerText,
+} from '@/lib/answerUtils';
 
 export default function ReviewPage() {
   const router = useRouter();
@@ -30,6 +36,8 @@ export default function ReviewPage() {
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  // 多选题勾选项
+  const [multiSelected, setMultiSelected] = useState<number[]>([]);
   const [showResult, setShowResult] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [reviewedIds, setReviewedIds] = useState<string[]>([]);
@@ -37,12 +45,28 @@ export default function ReviewPage() {
   // 记录每题所选答案，用于滑动返回时恢复状态（滑动本身不显示答案）
   const [answerMap, setAnswerMap] = useState<Record<string, number>>({});
 
+  // "已掌握"会同时移出错题和不会的题，复习池会变短；
+  // 此时 currentIndex 可能已经越界，reviewPool[currentIndex] 为 undefined 会直接白屏
+  const safeIndex = Math.min(currentIndex, Math.max(reviewPool.length - 1, 0));
+  useEffect(() => {
+    if (currentIndex !== safeIndex) setCurrentIndex(safeIndex);
+  }, [currentIndex, safeIndex]);
+
   const handleSelect = useCallback((idx: number) => {
-    if (showResult) return;
+    const q = reviewPool[safeIndex];
+    if (showResult || !q) return;
+
+    // 多选题：先勾选，提交后判分
+    if (isMultiQuestion(q)) {
+      setMultiSelected(prev =>
+        prev.includes(idx) ? prev.filter(x => x !== idx) : [...prev, idx]
+      );
+      return;
+    }
+
     setSelectedAnswer(idx);
     setShowResult(true);
 
-    const q = reviewPool[currentIndex];
     const isCorrect = idx === q.answer;
     if (isCorrect) {
       setCorrectCount(prev => prev + 1);
@@ -50,8 +74,22 @@ export default function ReviewPage() {
       retryWrongQuestion(q.id, true);
     }
     setAnswerMap(prev => ({ ...prev, [q.id]: idx }));
-    setReviewedIds(prev => [...prev, q.id]);
-  }, [showResult, reviewPool, currentIndex, retryWrongQuestion]);
+    setReviewedIds(prev => (prev.includes(q.id) ? prev : [...prev, q.id]));
+  }, [showResult, reviewPool, safeIndex, retryWrongQuestion]);
+
+  // 提交多选题
+  const handleSubmitMulti = useCallback(() => {
+    const q = reviewPool[safeIndex];
+    if (!q || showResult || multiSelected.length === 0) return;
+    const isCorrect = checkAnswer(q, multiSelected);
+    setShowResult(true);
+    if (isCorrect) {
+      setCorrectCount(prev => prev + 1);
+      retryWrongQuestion(q.id, true);
+    }
+    setAnswerMap(prev => ({ ...prev, [q.id]: multiSelected[0] }));
+    setReviewedIds(prev => (prev.includes(q.id) ? prev : [...prev, q.id]));
+  }, [showResult, reviewPool, safeIndex, multiSelected, retryWrongQuestion]);
 
   // 跳到指定题目：已作答的恢复状态，未作答保持未作答
   const goToQuestion = useCallback((nextIndex: number) => {
@@ -69,8 +107,8 @@ export default function ReviewPage() {
   }, [reviewPool, answerMap]);
 
   const handleNext = useCallback(() => {
-    if (currentIndex < reviewPool.length - 1) {
-      goToQuestion(currentIndex + 1);
+    if (safeIndex < reviewPool.length - 1) {
+      goToQuestion(safeIndex + 1);
     } else {
       // 完成复习
       const today = new Date().toISOString().split('T')[0];
@@ -81,7 +119,7 @@ export default function ReviewPage() {
       });
       setCompleted(true);
     }
-  }, [currentIndex, reviewPool.length, reviewedIds, addReviewRecord, goToQuestion]);
+  }, [safeIndex, reviewPool.length, reviewedIds, addReviewRecord, goToQuestion]);
 
   const handleMastered = useCallback((questionId: string) => {
     removeWrongQuestion(questionId);
@@ -90,8 +128,8 @@ export default function ReviewPage() {
 
   // 滑动手势：中间区左滑下一题/右滑上一题；左边距区左滑返回；右边距区右滑无效
   const swipeRef = useSwipeNav<HTMLDivElement>({
-    onNext: () => goToQuestion(currentIndex + 1),
-    onPrev: () => goToQuestion(currentIndex - 1),
+    onNext: () => goToQuestion(safeIndex + 1),
+    onPrev: () => goToQuestion(safeIndex - 1),
     onLeftEdgeBack: () => router.back(),
   });
 
@@ -165,7 +203,16 @@ export default function ReviewPage() {
     );
   }
 
-  const currentQ = reviewPool[currentIndex];
+  const currentQ = reviewPool[safeIndex];
+  // 兜底：复习池已空或下标越界时不再白屏
+  if (!currentQ) {
+    return (
+      <div className="px-4 pt-6 pb-4 text-center">
+        <p className="text-gray-500">没有可复习的题目了</p>
+        <button onClick={() => router.push('/')} className="mt-4 text-emerald-500 text-sm">返回首页</button>
+      </div>
+    );
+  }
   const isWrong = wrongQuestions.some(w => w.questionId === currentQ.id);
   const isConfused = confusedQuestions.includes(currentQ.id);
 
@@ -179,14 +226,14 @@ export default function ReviewPage() {
           </svg>
         </button>
         <h1 className="text-lg font-bold text-gray-800 dark:text-slate-200">📅 每日复习</h1>
-        <span className="text-xs text-gray-400 ml-auto">{currentIndex + 1}/{reviewPool.length}</span>
+        <span className="text-xs text-gray-400 ml-auto">{safeIndex + 1}/{reviewPool.length}</span>
       </div>
 
       {/* 进度条 */}
       <div className="h-2 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
         <div
           className="h-full bg-gradient-to-r from-blue-400 to-emerald-500 rounded-full transition-all duration-300"
-          style={{ width: `${((currentIndex + 1) / reviewPool.length) * 100}%` }}
+          style={{ width: `${((safeIndex + 1) / reviewPool.length) * 100}%` }}
         />
       </div>
 
@@ -197,28 +244,48 @@ export default function ReviewPage() {
       </div>
 
       {/* 题目 */}
-      <QuestionCard question={currentQ} index={currentIndex} total={reviewPool.length} />
+      <QuestionCard question={currentQ} index={safeIndex} total={reviewPool.length} />
 
       {/* 选项 */}
       <div className="space-y-2.5">
-        {currentQ.options.map((opt, idx) => (
-          <OptionButton
-            key={idx}
-            label={labels[idx]}
-            text={opt}
-            correct={showResult && idx === currentQ.answer}
-            wrong={showResult && idx === selectedAnswer && idx !== currentQ.answer}
-            disabled={showResult}
-            onClick={() => handleSelect(idx)}
-          />
-        ))}
+        {currentQ.options.map((opt, idx) => {
+          const isMulti = isMultiQuestion(currentQ);
+          const correctSet = correctIndices(currentQ);
+          const isCorrectOpt = correctSet.includes(idx);
+          const picked = isMulti ? multiSelected.includes(idx) : idx === selectedAnswer;
+          return (
+            <OptionButton
+              key={idx}
+              label={labels[idx]}
+              text={opt}
+              correct={showResult && isCorrectOpt}
+              wrong={showResult && !isMulti && idx === selectedAnswer && !isCorrectOpt}
+              selected={!showResult && picked}
+              disabled={showResult}
+              onClick={() => handleSelect(idx)}
+            />
+          );
+        })}
       </div>
+
+      {/* 多选题提交 */}
+      {isMultiQuestion(currentQ) && !showResult && (
+        <button
+          onClick={handleSubmitMulti}
+          disabled={multiSelected.length === 0}
+          className="w-full min-h-[48px] bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors shadow-md disabled:opacity-40"
+        >
+          提交答案（已选 {multiSelected.length} 项）
+        </button>
+      )}
 
       {/* 解析 */}
       {showResult && (
         <ExplanationPanel
-          correct={selectedAnswer === currentQ.answer}
-          correctAnswer={`${labels[currentQ.answer]}. ${currentQ.options[currentQ.answer]}`}
+          correct={isMultiQuestion(currentQ)
+            ? checkAnswer(currentQ, multiSelected)
+            : selectedAnswer === currentQ.answer}
+          correctAnswer={answerText(currentQ)}
           brief={currentQ.explanation.brief}
           detailed={currentQ.explanation.detailed}
           mode="quiz"
@@ -238,7 +305,7 @@ export default function ReviewPage() {
             onClick={handleNext}
             className="w-full min-h-[48px] bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors"
           >
-            {currentIndex < reviewPool.length - 1 ? '下一题 →' : '完成复习 🎉'}
+            {safeIndex < reviewPool.length - 1 ? '下一题 →' : '完成复习 🎉'}
           </button>
         </div>
       )}

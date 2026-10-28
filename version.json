@@ -1,7 +1,7 @@
 {
-  "version": "1.3.3",
-  "versionCode": 16,
-  "downloadUrl": "https://github.com/hu141-hu/shuatibao-app/releases/download/v1.3.3/app-release.apk",
-  "changelog": "v1.3.3 (2026-08-15)\n\n修复：\n- 图片导入：识别结果为空时不再空白，自动退回显示原始文字\n- 转换器支持更多排版：(1)（1）括号题号、无题号排版（空行分题）、自动开题\n- 未识别出题目时给出明确提示与建议",
+  "version": "1.4.1",
+  "versionCode": 18,
+  "downloadUrl": "https://github.com/hu141-hu/shuatibao-app/releases/download/v1.4.1/app-release.apk",
+  "changelog": "v1.4.1 (2026-10-28)\n\n新功能：\n- 内置题库换为《3500题》上册教育学题库：1083 题（单选 650 / 多选 237 / 判断 196），全部带答案与精简解析\n- 题库目录按「教育学 → 7 章 → 17 节」三级组织，与粉笔一致，可逐级进入并按节刷题\n- 原生支持多选题（可多选、提交后按集合判分，全部选对才得分）与判断题（正确/错误两选项）\n- 知识点页面改为每节一份考点清单，共 17 份\n- 旧版内置演示题库（常识/逻辑/言语/数量）已清空；设备上的旧目录会自动升级为新题库目录\n\n修复：\n- 多选题答案此前只取首个正确项，现按完整答案集合判分\n- 选项字母支持到 A-H（部分多选题有 E 选项）",
   "forceUpdate": false
 }

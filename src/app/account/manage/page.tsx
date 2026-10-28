@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 import { loadUserProgress } from '@/lib/store';
@@ -29,14 +29,28 @@ export default function ManageAccountsPage() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [switching, setSwitching] = useState<string | null>(null);
 
+  // 切换动画的延时任务：不在卸载时清掉，离开页面后仍会执行切换并强制跳首页
+  const switchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+  }, []);
+
   const handleSwitch = (userId: string) => {
     setSwitching(userId);
-    setTimeout(() => {
+    if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+    switchTimerRef.current = setTimeout(() => {
       switchAccount(userId);
       setSwitching(null);
       router.push('/');
     }, 400);
   };
+
+  // 原来在 map 里对每个账号各读一次 localStorage 并 JSON.parse，每次渲染都重复一遍
+  const progressMap = useMemo(() => {
+    const map: Record<string, ReturnType<typeof loadUserProgress>> = {};
+    accounts.forEach(a => { map[a.id] = loadUserProgress(a.id); });
+    return map;
+  }, [accounts]);
 
   const handleDelete = (userId: string) => {
     deleteAccount(userId);
@@ -63,9 +77,10 @@ export default function ManageAccountsPage() {
         {accounts.map((acct, idx) => {
           const isCurrent = currentUser?.id === acct.id;
           const isSwitching = switching === acct.id;
-          const progress = loadUserProgress(acct.id);
-          const accuracy = progress.totalCount > 0
-            ? Math.round((progress.totalCorrect / progress.totalCount) * 100)
+          const progress = progressMap[acct.id];
+          const totalCount = progress?.totalCount ?? 0;
+          const accuracy = totalCount > 0
+            ? Math.round(((progress?.totalCorrect ?? 0) / totalCount) * 100)
             : 0;
 
           return (
@@ -92,7 +107,7 @@ export default function ManageAccountsPage() {
                       )}
                     </div>
                     <div className="flex gap-4 mt-1 text-sm text-white/80">
-                      <span>刷题 {progress.totalCount}</span>
+                      <span>刷题 {totalCount}</span>
                       <span>正确率 {accuracy}%</span>
                     </div>
                   </div>

@@ -13,7 +13,9 @@ function loadHistory(): string[] {
   if (typeof window === 'undefined') return [];
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    // 脏数据不是数组时（被其它逻辑写成对象/字符串）history.map 会直接白屏
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : [];
   } catch { return []; }
 }
 
@@ -22,14 +24,22 @@ function saveHistory(h: string[]) {
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); } catch {}
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>
+  )[c]);
+}
+
 function highlightText(text: string, keyword: string) {
-  if (!keyword.trim()) return text;
+  // 结果用 dangerouslySetInnerHTML 渲染，题干/选项来自导入题库或用户自定义，
+  // 不转义会被当作 HTML 执行（自 XSS）
+  if (!keyword.trim()) return escapeHtml(text);
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const parts = text.split(new RegExp(`(${escaped})`, 'gi'));
-  return parts.map((part, i) =>
+  return parts.map((part) =>
     part.toLowerCase() === keyword.toLowerCase()
-      ? `<mark style="background:#FEF08A;padding:0 1px;border-radius:2px;">${part}</mark>`
-      : part
+      ? `<mark style="background:#FEF08A;padding:0 1px;border-radius:2px;">${escapeHtml(part)}</mark>`
+      : escapeHtml(part)
   ).join('');
 }
 

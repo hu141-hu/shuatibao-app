@@ -56,3 +56,8 @@ android/keystore.properties
 /public/ocr/lang/
 /public/ocr/*.wasm
 /public/ocr/*.wasm.js
+
+# 本地构建产物/日志
+/_stale/
+_build_*.log
+_gradle_*.log

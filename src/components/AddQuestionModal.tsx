@@ -54,7 +54,8 @@ export default function AddQuestionModal({ isOpen, onClose, onAdd }: AddQuestion
     }
 
     const newQuestion: Question = {
-      id: `custom-${Date.now()}`,
+      // 补随机后缀：同一毫秒内连续添加会生成重复 id，导致收藏/错题按 id 串题、React key 冲突
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       category,
       difficulty,
       question: questionText.trim(),

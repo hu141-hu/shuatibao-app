@@ -4,13 +4,20 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useStore } from '@/lib/store';
 
-const labels = ['A', 'B', 'C', 'D'];
-const CATEGORIES = ['全部', '常识判断', '逻辑推理', '言语理解', '数量关系'];
+import { answerText } from '@/lib/answerUtils';
+
 
 export default function ConfusedPage() {
   const router = useRouter();
   const { confusedQuestions, allQuestions, removeConfusedQuestion } = useStore();
   const [selectedCategory, setSelectedCategory] = useState('全部');
+
+  // 分类筛选：从实际题库动态派生（当前为教育学各节）
+  const CATEGORIES = useMemo(() => {
+    const set = new Set<string>();
+    for (const q of allQuestions) set.add(q.category || '未分类');
+    return ['全部', ...Array.from(set)];
+  }, [allQuestions]);
 
   const confusedWithDetails = useMemo(() => {
     return confusedQuestions
@@ -69,7 +76,7 @@ export default function ConfusedPage() {
               </div>
               <p className="text-sm text-gray-700 dark:text-slate-300 leading-relaxed line-clamp-2">{q.question}</p>
               <div className="mt-2 text-xs text-emerald-600 dark:text-emerald-400">
-                正确答案：{labels[q.answer]}. {q.options[q.answer]}
+                正确答案：{answerText(q)}
               </div>
               <button
                 onClick={() => removeConfusedQuestion(q.id)}

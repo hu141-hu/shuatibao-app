@@ -11,7 +11,13 @@ import ExplanationPanel from '@/components/ExplanationPanel';
 import FavoriteButton from '@/components/FavoriteButton';
 import { useSwipeNav } from '@/lib/useSwipeNav';
 
-const labels = ['A', 'B', 'C', 'D'];
+import {
+  OPTION_LABELS as labels,
+  isMultiQuestion,
+  checkAnswer,
+  correctIndices,
+  answerText,
+} from '@/lib/answerUtils';
 
 // 生成练习记录 ID（避免在事件处理器中使用 Math.random，满足 React 纯函数规则）
 let studySeq = 0;
@@ -63,10 +69,23 @@ function StudyContent() {
   const [studyQuestions, setStudyQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  // 多选题勾选项
+  const [multiSelected, setMultiSelected] = useState<number[]>([]);
   const [showExplanation, setShowExplanation] = useState(false);
   const [answered, setAnswered] = useState(false);
   const [confusedAnim, setConfusedAnim] = useState(false);
   const [questionStartTime, setQuestionStartTime] = useState(() => Date.now());
+
+  // 开始一轮学习：换分类时必须重置下标与作答状态，
+  // 否则上一轮停在第 5 题、新分类只有 3 题时 currentIndex 越界，currentQ 为 undefined 直接白屏
+  const startStudy = useCallback((qs: Question[]) => {
+    setStudyQuestions(qs.length > 0 ? qs : []);
+    setCurrentIndex(0);
+    setSelectedAnswer(null);
+    setShowExplanation(false);
+    setAnswered(false);
+    setQuestionStartTime(Date.now());
+  }, []);
 
   // URL参数支持
   useEffect(() => {
@@ -80,51 +99,54 @@ function StudyContent() {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- 初始化时根据 URL 参数同步选中状态
       if (sec && sec.parentId) setSelectedChapterId(sec.parentId);
       setSelectedSectionId(secId);
-      const qs = getQuestionsByCategoryId(secId);
-      setStudyQuestions(qs.length > 0 ? qs : []);
+      startStudy(getQuestionsByCategoryId(secId));
     } else if (chId) {
       setSelectedChapterId(chId);
-      const qs = getQuestionsByCategoryId(chId);
-      setStudyQuestions(qs.length > 0 ? qs : []);
+      startStudy(getQuestionsByCategoryId(chId));
     } else if (oldCategory) {
       const ch = chapters.find(c => c.name === oldCategory);
       if (ch) {
         setSelectedChapterId(ch.id);
-        const qs = getQuestionsByCategoryId(ch.id);
-        setStudyQuestions(qs.length > 0 ? qs : []);
+        startStudy(getQuestionsByCategoryId(ch.id));
       }
     }
-  }, [searchParams, categoryHierarchy, chapters, getQuestionsByCategoryId]);
+  }, [searchParams, categoryHierarchy, chapters, getQuestionsByCategoryId, startStudy]);
 
   const handleSelectChapter = (chapterId: string) => {
     setSelectedChapterId(chapterId);
     setSelectedSectionId(null);
     const sections = getSections(chapterId);
     if (sections.length === 0) {
-      const qs = getQuestionsByCategoryId(chapterId);
-      setStudyQuestions(qs.length > 0 ? qs : []);
+      startStudy(getQuestionsByCategoryId(chapterId));
     }
   };
 
   const handleSelectSection = (sectionId: string) => {
     setSelectedSectionId(sectionId);
-    const qs = getQuestionsByCategoryId(sectionId);
-    setStudyQuestions(qs.length > 0 ? qs : []);
+    startStudy(getQuestionsByCategoryId(sectionId));
   };
 
   const handleStartAllInChapter = () => {
     if (!selectedChapterId) return;
     setSelectedSectionId(null);
-    const qs = getQuestionsByCategoryId(selectedChapterId);
-    setStudyQuestions(qs.length > 0 ? qs : []);
+    startStudy(getQuestionsByCategoryId(selectedChapterId));
   };
 
   const handleSelect = (optionIndex: number) => {
-    if (answered) return;
+    const currentQ = studyQuestions[currentIndex];
+    if (answered || !currentQ) return;
+
+    // 多选题：先勾选，提交后判分
+    if (isMultiQuestion(currentQ)) {
+      setMultiSelected(prev =>
+        prev.includes(optionIndex) ? prev.filter(x => x !== optionIndex) : [...prev, optionIndex]
+      );
+      return;
+    }
+
     setSelectedAnswer(optionIndex);
     setAnswered(true);
     setShowExplanation(true);
-    const currentQ = studyQuestions[currentIndex];
     const isCorrect = optionIndex === currentQ.answer;
     recordAnswer(currentQ.id, isCorrect);
 
@@ -147,6 +169,32 @@ function StudyContent() {
     if (!isCorrect) {
       addWrongQuestion(currentQ.id);
     }
+  };
+
+  // 提交多选题
+  const handleSubmitMulti = () => {
+    const currentQ = studyQuestions[currentIndex];
+    if (!currentQ || answered || multiSelected.length === 0) return;
+    const isCorrect = checkAnswer(currentQ, multiSelected);
+    setAnswered(true);
+    setShowExplanation(true);
+    recordAnswer(currentQ.id, isCorrect);
+
+    // eslint-disable-next-line react-hooks/purity -- 事件处理器中记录作答用时
+    const timeSpent = Math.floor((Date.now() - questionStartTime) / 1000);
+    const record: PracticeRecord = {
+      id: nextPracticeId(),
+      date: new Date().toISOString().split('T')[0],
+      questionId: currentQ.id,
+      userAnswer: multiSelected[0],
+      correctAnswer: currentQ.answer,
+      isCorrect,
+      timeSpent,
+      mode: 'study',
+      category: currentQ.category,
+    };
+    addPracticeRecord(record);
+    if (!isCorrect) addWrongQuestion(currentQ.id);
   };
 
   const handleShowExplanation = () => {
@@ -185,7 +233,7 @@ function StudyContent() {
 
   const handleBack = () => {
     if (studyQuestions.length > 0) {
-      setStudyQuestions([]);
+      startStudy([]);
       setSelectedSectionId(null);
       setSelectedChapterId(null);
     } else if (selectedSectionId) {
@@ -307,6 +355,15 @@ function StudyContent() {
   }
 
   const currentQ = studyQuestions[currentIndex];
+  // 兜底：题目列表被外部改动导致下标越界时不再白屏
+  if (!currentQ) {
+    return (
+      <div className="px-4 pt-6 text-center">
+        <p className="text-gray-500">题目已不可用</p>
+        <button onClick={handleBack} className="mt-4 text-blue-500 text-sm">返回选择</button>
+      </div>
+    );
+  }
   const isConfused = confusedQuestions.includes(currentQ.id);
 
   return (
@@ -347,8 +404,11 @@ function StudyContent() {
       {/* 选项 */}
       <div className="space-y-2.5">
         {currentQ.options.map((opt, idx) => {
-          const isCorrect = answered && idx === currentQ.answer;
-          const isWrong = answered && idx === selectedAnswer && idx !== currentQ.answer;
+          const isMulti = isMultiQuestion(currentQ);
+          const correctSet = correctIndices(currentQ);
+          const isCorrect = answered && correctSet.includes(idx);
+          const isWrong = answered && !isMulti && idx === selectedAnswer && !correctSet.includes(idx);
+          const picked = isMulti ? multiSelected.includes(idx) : idx === selectedAnswer;
 
           return (
             <OptionButton
@@ -357,13 +417,24 @@ function StudyContent() {
               text={opt}
               correct={isCorrect}
               wrong={isWrong}
-              selected={selectedAnswer === idx && !answered}
+              selected={!answered && picked}
               disabled={answered}
               onClick={() => handleSelect(idx)}
             />
           );
         })}
       </div>
+
+      {/* 多选题提交 */}
+      {isMultiQuestion(currentQ) && !answered && (
+        <button
+          onClick={handleSubmitMulti}
+          disabled={multiSelected.length === 0}
+          className="w-full min-h-[48px] bg-emerald-500 text-white font-semibold rounded-xl hover:bg-emerald-600 transition-colors shadow-md disabled:opacity-40"
+        >
+          提交答案（已选 {multiSelected.length} 项）
+        </button>
+      )}
 
       {/* 查看解析按钮 */}
       {!showExplanation && (
@@ -378,8 +449,10 @@ function StudyContent() {
       {/* 解析面板 */}
       {showExplanation && (
         <ExplanationPanel
-          correct={selectedAnswer !== null && selectedAnswer === currentQ.answer}
-          correctAnswer={`${labels[currentQ.answer]}. ${currentQ.options[currentQ.answer]}`}
+          correct={isMultiQuestion(currentQ)
+            ? checkAnswer(currentQ, multiSelected)
+            : selectedAnswer !== null && selectedAnswer === currentQ.answer}
+          correctAnswer={answerText(currentQ)}
           detailed={currentQ.explanation.detailed}
           knowledge={currentQ.explanation.knowledge}
           tips={currentQ.explanation.tips}

@@ -7,7 +7,7 @@ import { getQuestionById } from '@/data/questions';
 import StatsCharts from '@/components/StatsCharts';
 import { PracticeRecord } from '@/types';
 
-const categoryOptions = ['全部', '常识判断', '逻辑推理', '言语理解', '数量关系'] as const;
+
 const timeRanges = [
   { label: '7天', days: 7 },
   { label: '30天', days: 30 },
@@ -17,7 +17,15 @@ const resultOptions = ['全部', '答对的', '答错的'] as const;
 
 export default function HistoryPage() {
   const router = useRouter();
-  const { practiceHistory } = useStore();
+  const { practiceHistory, allQuestions } = useStore();
+
+  // 分类筛选：从实际题库动态派生
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const q of allQuestions) set.add(q.category || '未分类');
+    for (const r of practiceHistory) if (r.category) set.add(r.category);
+    return ['全部', ...Array.from(set)];
+  }, [allQuestions, practiceHistory]);
   const [timeRange, setTimeRange] = useState<number>(30);
   const [category, setCategory] = useState<string>('全部');
   const [resultFilter, setResultFilter] = useState<string>('全部');

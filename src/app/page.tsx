@@ -7,6 +7,7 @@ import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/store';
 import ProgressRing from '@/components/ProgressRing';
 import ImportModal from '@/components/ImportModal';
+import { getCategoryQuestions } from '@/lib/categoryUtils';
 import { ImportedBank, Question } from '@/types';
 
 const categoryIcons: Record<string, string> = {
@@ -22,7 +23,7 @@ export default function HomePage() {
   const router = useRouter();
   const {
     currentUser, progress, wrongQuestions, confusedQuestions, todayReviewCount,
-    addImportedQuestions, allQuestions, categoryHierarchy,
+    addImportedQuestions, allQuestions, categoryHierarchy, practiceHistory,
   } = useStore();
   const { resolvedTheme, setTheme } = useTheme();
   const [showImportModal, setShowImportModal] = useState(false);
@@ -72,18 +73,10 @@ export default function HomePage() {
       .sort((a, b) => a.order - b.order);
   }, [categoryHierarchy]);
 
-  // 获取分类下的题目数（含子分类）
+  // 获取分类下的题目数（递归所有后代：章 → 节 → 知识点）
   const getCategoryQuestionCount = useCallback((catId: string) => {
-    const cat = categoryHierarchy.find(c => c.id === catId);
-    if (!cat) return 0;
-    if (cat.level === 'chapter') {
-      // 章 = 自身题目 + 所有节的题目
-      const sections = getSections(catId);
-      const sectionCount = sections.reduce((sum, s) => sum + s.questionIds.length, 0);
-      return cat.questionIds.length + sectionCount;
-    }
-    return cat.questionIds.length;
-  }, [categoryHierarchy, getSections]);
+    return getCategoryQuestions(categoryHierarchy, allQuestions, catId).length;
+  }, [categoryHierarchy, allQuestions]);
 
   const toggleExpand = (chapterId: string) => {
     setExpandedChapters(prev => {
@@ -202,7 +195,7 @@ export default function HomePage() {
       </div>
 
       {/* 入口按钮 */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <Link
           href="/quiz"
           className="bg-emerald-500 text-white rounded-2xl p-4 text-center shadow-lg shadow-emerald-200 hover:bg-emerald-600 transition-colors card-hover"
@@ -210,14 +203,6 @@ export default function HomePage() {
           <span className="text-2xl block mb-1">⚡</span>
           <span className="font-bold text-sm">刷题模式</span>
           <p className="text-xs text-emerald-100 mt-0.5">限时挑战</p>
-        </Link>
-        <Link
-          href="/study"
-          className="bg-blue-500 text-white rounded-2xl p-4 text-center shadow-lg shadow-blue-200 hover:bg-blue-600 transition-colors card-hover"
-        >
-          <span className="text-2xl block mb-1">📖</span>
-          <span className="font-bold text-sm">学习模式</span>
-          <p className="text-xs text-blue-100 mt-0.5">深度学习</p>
         </Link>
         <button
           onClick={() => setShowImportModal(true)}
@@ -247,34 +232,30 @@ export default function HomePage() {
                   {/* 左侧绿色色条 */}
                   <div className="absolute left-0 top-0 bottom-0 w-1 bg-emerald-500 dark:bg-emerald-400 rounded-l-2xl" />
                   <div
-                    className={`bg-white dark:bg-slate-800 rounded-2xl pl-4 pr-4 py-4 shadow-sm border border-gray-100 dark:border-slate-700 transition-all ${
-                      hasSections ? 'cursor-pointer hover:shadow-md' : 'hover:shadow-md'
-                    }`}
-                    onClick={() => hasSections ? toggleExpand(chapter.id) : undefined}
+                    className="bg-white dark:bg-slate-800 rounded-2xl pl-4 pr-4 py-4 shadow-sm border border-gray-100 dark:border-slate-700 transition-all hover:shadow-md"
                   >
                     <div className="flex items-center justify-between">
-                      {hasSections ? (
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-800 dark:text-slate-200 truncate">{chapter.name}</h3>
-                          <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
-                            {totalQ} 道题 · {sections.length} 个节
-                          </p>
-                        </div>
-                      ) : (
-                        <Link href={`/quiz?chapterId=${chapter.id}`} className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-gray-800 dark:text-slate-200 truncate">{chapter.name}</h3>
-                          <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{totalQ} 道题</p>
-                        </Link>
-                      )}
+                      <Link href={`/quiz?chapterId=${chapter.id}&from=home`} className="flex-1 min-w-0">
+                        <h3 className="font-semibold text-gray-800 dark:text-slate-200 truncate">{chapter.name}</h3>
+                        <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                          {totalQ} 道题{sections.length > 0 ? ` · ${sections.length} 个节` : ''}
+                        </p>
+                      </Link>
                       <div className="flex items-center gap-2">
                         <span className="text-lg">{categoryIcons[chapter.name] || defaultIcon}</span>
                         {hasSections && (
-                          <svg
-                            className={`w-5 h-5 text-gray-400 dark:text-slate-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
-                            fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                          <button
+                            onClick={() => toggleExpand(chapter.id)}
+                            aria-label={isExpanded ? '收起' : '展开'}
+                            className="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 dark:hover:bg-slate-700"
                           >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
+                            <svg
+                              className={`w-5 h-5 text-gray-400 dark:text-slate-500 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`}
+                              fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -287,7 +268,7 @@ export default function HomePage() {
                     {sections.map((section) => (
                       <Link
                         key={section.id}
-                        href={`/quiz?sectionId=${section.id}`}
+                        href={`/quiz?sectionId=${section.id}&from=home`}
                         className="block"
                       >
                         <div className="relative overflow-hidden">
@@ -310,7 +291,7 @@ export default function HomePage() {
                     {/* 如果章本身也有题目，显示"章级题目"入口 */}
                     {chapter.questionIds.length > 0 && (
                       <Link
-                        href={`/quiz?chapterId=${chapter.id}`}
+                        href={`/quiz?chapterId=${chapter.id}&from=home`}
                         className="block"
                       >
                         <div className="relative overflow-hidden">

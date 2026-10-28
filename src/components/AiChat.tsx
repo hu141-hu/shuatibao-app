@@ -14,10 +14,16 @@ import {
 
 const labels = ['A', 'B', 'C', 'D'];
 
+// 单题 AI 会话保留的最大消息条数（含 system 与首条题目）
+const MAX_HISTORY = 10;
+
 interface AiChatProps {
   question: Question;
   userAnswer: number | null;
   correctAnswer: number;
+  /** 多选题等场景下用完整文本描述正确答案/作答 */
+  correctAnswerText?: string;
+  userAnswerText?: string;
 }
 
 function buildSystemPrompt(): ChatMessage {
@@ -33,14 +39,22 @@ function buildSystemPrompt(): ChatMessage {
   };
 }
 
-function buildFirstUserMessage(q: Question, userAnswer: number | null, correctAnswer: number): ChatMessage {
+function buildFirstUserMessage(
+  q: Question,
+  userAnswer: number | null,
+  correctAnswer: number,
+  correctAnswerText?: string,
+  userAnswerText?: string
+): ChatMessage {
   const lines: string[] = [];
   lines.push(`【题目】${q.question}`);
   lines.push('【选项】');
   q.options.forEach((opt, i) => lines.push(`${labels[i]}. ${opt}`));
-  lines.push(`【正确答案】${labels[correctAnswer]}. ${q.options[correctAnswer]}`);
-  if (userAnswer !== null && userAnswer !== correctAnswer) {
-    lines.push(`【我的作答】${labels[userAnswer]}. ${q.options[userAnswer]}（答错了）`);
+  const correctText = correctAnswerText ?? `${labels[correctAnswer]}. ${q.options[correctAnswer]}`;
+  lines.push(`【正确答案】${correctText}`);
+  const myText = userAnswerText ?? (userAnswer !== null ? `${labels[userAnswer]}. ${q.options[userAnswer]}` : '未作答');
+  if (myText !== correctText && myText !== '未作答') {
+    lines.push(`【我的作答】${myText}（答错了）`);
   }
   lines.push('请讲解这道题。');
   return { role: 'user', content: lines.join('\n') };
@@ -128,7 +142,7 @@ function renderMarkdown(md: string): ReactNode {
   return <div className="text-gray-700 dark:text-slate-300">{nodes}</div>;
 }
 
-export default function AiChat({ question, userAnswer, correctAnswer }: AiChatProps) {
+export default function AiChat({ question, userAnswer, correctAnswer, correctAnswerText, userAnswerText }: AiChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -165,7 +179,7 @@ export default function AiChat({ question, userAnswer, correctAnswer }: AiChatPr
   const startExplain = async () => {
     setLoading(true);
     setError('');
-    const base: ChatMessage[] = [buildSystemPrompt(), buildFirstUserMessage(question, userAnswer, correctAnswer)];
+    const base: ChatMessage[] = [buildSystemPrompt(), buildFirstUserMessage(question, userAnswer, correctAnswer, correctAnswerText, userAnswerText)];
     try {
       const reply = await aiChat(base);
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply };
@@ -186,11 +200,16 @@ export default function AiChat({ question, userAnswer, correctAnswer }: AiChatPr
     setError('');
     const userMsg: ChatMessage = { role: 'user', content: text };
     const next: ChatMessage[] = [...messages, userMsg];
-    persist(next);
+    // 会话无限追加会越攒越长，最终超出模型上下文导致请求直接报错；
+    // 保留 system + 首条题目，只滚动保留最近的若干轮
+    const trimmed = next.length > MAX_HISTORY
+      ? [next[0], next[1], ...next.slice(-(MAX_HISTORY - 2))]
+      : next;
+    persist(trimmed);
     try {
-      const reply = await aiChat(next);
+      const reply = await aiChat(trimmed);
       const assistantMsg: ChatMessage = { role: 'assistant', content: reply };
-      persist([...next, assistantMsg]);
+      persist([...trimmed, assistantMsg]);
     } catch (e) {
       setError(String((e && (e as Error).message) || e));
     } finally {

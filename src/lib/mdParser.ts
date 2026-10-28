@@ -211,6 +211,9 @@ export function parseMDFile(content: string, bankId: string): { questions: Quest
   const rawQuestions = parseRawQuestions(content);
   const questions: Question[] = [];
   const warnings: ParseWarning[] = [];
+  // 已生成的 id 集合：多张图片合并导入时每题都从"题目1"开始编号，
+  // 若直接用题号生成 id 会产生大量重复 id（串题、React key 冲突、分类里题目数量错乱）
+  const usedIds = new Set<string>();
 
   rawQuestions.forEach((raw, index) => {
     const num = extractQuestionNumber(raw.title) || String(index + 1);
@@ -226,13 +229,25 @@ export function parseMDFile(content: string, bankId: string): { questions: Quest
     if (raw.options.length < 2) {
       reasons.push('选项不足 2 个');
     }
+    // 答案是 D 但只识别到 2 个选项时索引会越界，导入后会显示 "D. undefined" 且该题永远答不对
+    if (answerIndex >= raw.options.length) {
+      reasons.push(`答案 ${raw.answer.trim()} 超出实际选项数量（${raw.options.length} 个）`);
+    }
     if (reasons.length > 0) {
       warnings.push({ index: num, reason: reasons.join('；') });
       return;
     }
 
+    let id = `imported-${bankId}-${num}`;
+    if (usedIds.has(id)) {
+      let suffix = 2;
+      while (usedIds.has(`${id}-${suffix}`)) suffix += 1;
+      id = `${id}-${suffix}`;
+    }
+    usedIds.add(id);
+
     questions.push({
-      id: `imported-${bankId}-${num}`,
+      id,
       category: '常识判断',
       difficulty: 2,
       question: raw.question,

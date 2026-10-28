@@ -1,3 +1,5 @@
+export type QuestionType = 'single' | 'multi' | 'judge';
+
 export interface Question {
   id: string;
   category: string;
@@ -5,6 +7,10 @@ export interface Question {
   question: string;
   options: string[];
   answer: number;
+  /** 题型：single 单选 / multi 多选 / judge 判断（缺省 single，兼容旧数据） */
+  type?: QuestionType;
+  /** 多选题的全部正确选项下标；单选/判断题无需此字段 */
+  answers?: number[];
   explanation: {
     brief: string;
     detailed: string;

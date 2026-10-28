@@ -22,7 +22,8 @@ export default function AddKnowledgeModal({ isOpen, onClose, onAdd }: AddKnowled
     if (!title.trim() || !content.trim()) return;
 
     const kp: KnowledgePoint = {
-      id: `kp-custom-${Date.now()}`,
+      // 补随机后缀：同一毫秒内连续添加会生成重复 id
+      id: `kp-custom-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       category,
       title: title.trim(),
       content: content.trim(),

@@ -42,12 +42,15 @@ export default function OcrImportModal({ isOpen, onClose, onImport }: OcrImportM
   }, []);
 
   const removeImage = useCallback((index: number) => {
+    // 在 state updater 里调用 revokeObjectURL 是副作用，StrictMode 下 updater 会执行两次导致提前释放
+    const target = previews[index];
+    if (target) {
+      URL.revokeObjectURL(target);
+      if (zoomedPreview === target) setZoomedPreview(null);
+    }
     setImages(prev => prev.filter((_, i) => i !== index));
-    setPreviews(prev => {
-      URL.revokeObjectURL(prev[index]);
-      return prev.filter((_, i) => i !== index);
-    });
-  }, []);
+    setPreviews(prev => prev.filter((_, i) => i !== index));
+  }, [previews, zoomedPreview]);
 
   const handleStartRecognition = async () => {
     if (images.length === 0) return;

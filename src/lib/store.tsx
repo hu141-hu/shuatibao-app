@@ -1,9 +1,10 @@
 'use client';
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useState, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState, useMemo } from 'react';
 import { UserProgress, Note, QuizResult, Question, ImportedBank, UserAccount, WrongQuestion, ReviewRecord, KnowledgePoint, PracticeRecord, CategoryHierarchy } from '@/types';
-import { questions as builtinQuestions } from '@/data/questions';
-import { builtinKnowledgePoints } from '@/data/knowledge';
+import { eduQuestions as builtinQuestions } from '@/data/eduQuestions';
+import { eduCategories } from '@/data/eduCategories';
+import { eduKnowledgePoints as builtinKnowledgePoints } from '@/data/eduKnowledge';
 
 const ACCOUNTS_KEY = 'accounts_list';
 const CURRENT_USER_KEY = 'current_user_id';
@@ -35,9 +36,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   // 初始化
   useEffect(() => {
-    const stored = localStorage.getItem(THEME_KEY) as Theme | null;
+    // 隐私模式下访问 localStorage 会抛错，需与其他读取处一样兜底
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(THEME_KEY);
+    } catch { /* ignore */ }
     if (stored && ['light', 'dark', 'system'].includes(stored)) {
-      setThemeState(stored);
+      setThemeState(stored as Theme);
     }
     setSystemTheme(getSystemTheme());
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -48,7 +53,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
-    localStorage.setItem(THEME_KEY, t);
+    try {
+      localStorage.setItem(THEME_KEY, t);
+    } catch { /* 存储不可用时仍切换外观，不影响使用 */ }
   }, []);
 
   const resolvedTheme = theme === 'system' ? systemTheme : theme;
@@ -92,40 +99,12 @@ const defaultProgress: UserProgress = {
 };
 
 // === 默认分类层级（为内置题目创建） ===
-const DEFAULT_CATEGORIES: CategoryHierarchy[] = [
-  {
-    id: 'cat-chapter-cs',
-    name: '常识判断',
-    parentId: null,
-    level: 'chapter',
-    order: 0,
-    questionIds: ['cs-001', 'cs-002', 'cs-003', 'cs-004', 'cs-005', 'cs-006'],
-  },
-  {
-    id: 'cat-chapter-lr',
-    name: '逻辑推理',
-    parentId: null,
-    level: 'chapter',
-    order: 1,
-    questionIds: ['lr-001', 'lr-002', 'lr-003', 'lr-004', 'lr-005', 'lr-006'],
-  },
-  {
-    id: 'cat-chapter-yr',
-    name: '言语理解',
-    parentId: null,
-    level: 'chapter',
-    order: 2,
-    questionIds: ['yr-001', 'yr-002', 'yr-003', 'yr-004', 'yr-005', 'yr-006'],
-  },
-  {
-    id: 'cat-chapter-sl',
-    name: '数量关系',
-    parentId: null,
-    level: 'chapter',
-    order: 3,
-    questionIds: ['sl-001', 'sl-002', 'sl-003', 'sl-004', 'sl-005', 'sl-006'],
-  },
-];
+const DEFAULT_CATEGORIES: CategoryHierarchy[] = eduCategories;
+
+/** 内置题库版本：变更时会刷新设备上的内置目录 */
+const BANK_VERSION = 'edu-3500-v1';
+/** 旧版内置目录 id 前缀（迁移时丢弃） */
+const OLD_BUILTIN_PREFIX = 'cat-chapter-';
 
 // === 按账号分区的 storage 工具 ===
 function userKey(userId: string, suffix: string) {
@@ -140,9 +119,16 @@ function loadJSON<T>(key: string, fallback: T): T {
   } catch { return fallback; }
 }
 
-function saveJSON(key: string, data: unknown) {
-  if (typeof window === 'undefined') return;
-  try { localStorage.setItem(key, JSON.stringify(data)); } catch {}
+function saveJSON(key: string, data: unknown): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+    return true;
+  } catch (e) {
+    // 配额超限/隐私模式会抛错，之前被静默吞掉，用户以为已保存
+    console.warn('[store] 保存失败（可能超出本地存储配额）:', key, e);
+    return false;
+  }
 }
 
 // === 账号列表 ===
@@ -220,7 +206,18 @@ function loadCategoryHierarchy(userId: string): CategoryHierarchy[] {
     // 首次使用，返回默认分类
     return DEFAULT_CATEGORIES;
   }
-  return stored;
+  // 内置题库版本变化时（旧版常识/逻辑等演示目录），丢弃旧内置目录并换成新题库目录，
+  // 用户自建目录保留。
+  const ver = loadJSON<string>(userKey(userId, 'bankVersion'), '');
+  if (ver === BANK_VERSION) return stored;
+  const userCats = stored.filter(
+    c => !c.id.startsWith(OLD_BUILTIN_PREFIX) && !c.id.startsWith('cat-edu')
+  );
+  const keptIds = new Set(userCats.map(c => c.id));
+  const validUserCats = userCats.filter(
+    c => c.parentId === null || keptIds.has(c.parentId)
+  );
+  return [...DEFAULT_CATEGORIES, ...validUserCats];
 }
 
 // === Action 类型 ===
@@ -239,7 +236,9 @@ type Action =
   | { type: 'ADD_CONFUSED'; payload: string }
   | { type: 'REMOVE_CONFUSED'; payload: string }
   | { type: 'ADD_REVIEW'; payload: ReviewRecord }
-  | { type: 'TOGGLE_KNOWLEDGE_FAVORITE'; payload: string };
+  | { type: 'TOGGLE_KNOWLEDGE_FAVORITE'; payload: string }
+  | { type: 'SET_FAVORITES'; payload: string[] }
+  | { type: 'SET_NOTES'; payload: Note[] };
 
 function reducer(state: UserProgress, action: Action): UserProgress {
   const today = getToday();
@@ -252,7 +251,9 @@ function reducer(state: UserProgress, action: Action): UserProgress {
     case 'RECORD_ANSWER': {
       const { questionId, isCorrect } = action.payload;
       const dailyStats = { ...state.dailyStats };
-      const todayStat = dailyStats[today] || { count: 0, correct: 0 };
+      // 必须复制当日统计对象：直接 += 会就地修改旧 state（StrictMode 下 reducer 双调用会重复计数）
+      const prevStat = dailyStats[today] || { count: 0, correct: 0 };
+      const todayStat = { count: prevStat.count, correct: prevStat.correct };
       todayStat.count += 1;
       if (isCorrect) todayStat.correct += 1;
       dailyStats[today] = todayStat;
@@ -284,7 +285,9 @@ function reducer(state: UserProgress, action: Action): UserProgress {
     case 'RECORD_QUIZ_RESULT': {
       const result = action.payload;
       const dailyStats = { ...state.dailyStats };
-      const todayStat = dailyStats[today] || { count: 0, correct: 0 };
+      // 同上：复制后再累加，避免就地修改旧 state
+      const prevStat = dailyStats[today] || { count: 0, correct: 0 };
+      const todayStat = { count: prevStat.count, correct: prevStat.correct };
       todayStat.count += result.total;
       todayStat.correct += result.correct;
       dailyStats[today] = todayStat;
@@ -339,6 +342,8 @@ function reducer(state: UserProgress, action: Action): UserProgress {
     case 'REMOVE_CONFUSED': return state;
     case 'RETRY_WRONG': return state;
     case 'TOGGLE_KNOWLEDGE_FAVORITE': return state; // knowledge favorites stored separately
+    case 'SET_FAVORITES': return { ...state, favoriteIds: action.payload };
+    case 'SET_NOTES': return { ...state, notes: action.payload };
     default: return state;
   }
 }
@@ -411,6 +416,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [accounts, setAccounts] = useState<UserAccount[]>([]);
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  // 切换账号的瞬间：新用户的 progress 还没 dispatch 进来，此时保存会把上一个账号的进度写进新账号
+  const loadingUserRef = useRef(false);
 
   // 进度
   const [progress, dispatch] = useReducer(reducer, defaultProgress);
@@ -465,6 +472,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // 切换/加载用户数据
   const loadUserData = useCallback((userId: string) => {
+    loadingUserRef.current = true;
     dispatch({ type: 'LOAD', payload: userId });
     setWrongQuestions(loadWrongQuestions(userId));
     setConfusedQuestions(loadConfusedQuestions(userId));
@@ -487,7 +495,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // 保存进度
   useEffect(() => {
-    if (currentUser) saveJSON(userKey(currentUser.id, 'progress'), progress);
+    if (!currentUser) return;
+    // 刚切账号、新数据尚未注入时跳过本次写入，避免把上个账号的进度写到新账号名下
+    if (loadingUserRef.current) {
+      loadingUserRef.current = false;
+      return;
+    }
+    saveJSON(userKey(currentUser.id, 'progress'), progress);
   }, [progress, currentUser]);
 
   // 保存错题
@@ -522,7 +536,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // 保存分类层级
   useEffect(() => {
-    if (currentUser) saveJSON(userKey(currentUser.id, 'categoryHierarchy'), categoryHierarchy);
+    if (currentUser) {
+      saveJSON(userKey(currentUser.id, 'categoryHierarchy'), categoryHierarchy);
+      saveJSON(userKey(currentUser.id, 'bankVersion'), BANK_VERSION);
+    }
   }, [categoryHierarchy, currentUser]);
 
   // === 账号操作 ===
@@ -665,12 +682,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // === 导入题库 ===
   const addImportedQuestions = useCallback((bank: ImportedBank, newQs: Question[]) => {
     if (!currentUser) return;
-    const nextBanks = [...importedBanks, bank];
-    const nextQuestions = [...importedQuestions, ...newQs];
-    setImportedBanks(nextBanks);
-    setImportedQuestions(nextQuestions);
-    saveJSON(userKey(currentUser.id, 'importedBanks'), nextBanks);
-    saveJSON(userKey(currentUser.id, 'importedQuestions'), nextQuestions);
+    const uid = currentUser.id;
+    // 用函数式更新：连续导入两次时，闭包里的 importedBanks/importedQuestions 还是旧值，会互相覆盖
+    setImportedBanks(prev => {
+      const next = [...prev, bank];
+      saveJSON(userKey(uid, 'importedBanks'), next);
+      return next;
+    });
+    setImportedQuestions(prev => {
+      const next = [...prev, ...newQs];
+      saveJSON(userKey(uid, 'importedQuestions'), next);
+      return next;
+    });
     // 将导入的题目加入分类层级
     const qIds = newQs.map(q => q.id);
     setCategoryHierarchy(prev => {
@@ -689,13 +712,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       return updated;
     });
-  }, [currentUser, importedBanks, importedQuestions]);
+  }, [currentUser]);
 
   const removeImportedBank = useCallback((bankId: string) => {
     if (!currentUser) return;
     
-    // 1. 获取要删除的题目 ID（通过 bankId 精确匹配）
-    const questionsToRemove = importedQuestions.filter(q => q.id === bankId || q.id.startsWith(bankId + '-'));
+    // 1. 获取要删除的题目 ID
+    // 题目 id 由 mdParser 生成为 `imported-<bankId>-<题号>`，老数据可能是 `<bankId>-<题号>`，
+    // 只按 bankId 前缀匹配会全部漏掉，导致"删了题库但题目还在"。
+    const idPrefixes = [`imported-${bankId}-`, `${bankId}-`];
+    const questionsToRemove = importedQuestions.filter(
+      q => q.id === bankId || idPrefixes.some(prefix => q.id.startsWith(prefix))
+    );
     const removedQIds = questionsToRemove.map(q => q.id);
     
     // 2. 从错题本中移除这些题目的记录
@@ -708,15 +736,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setConfusedQuestions(updatedConfusedQuestions);
     saveJSON(userKey(currentUser.id, 'confusedQuestions'), updatedConfusedQuestions);
     
-    // 4. 从收藏列表中移除
-    const updatedFavoriteIds = progress.favoriteIds.filter(id => !removedQIds.includes(id));
-    dispatch({ type: 'TOGGLE_FAVORITE', payload: '' }); // 占位，实际不会触发
-    
-    // 5. 从笔记中移除（如果有包含这些题目 ID 的笔记）
-    const updatedNotes = progress.notes.filter(n => 
-      !removedQIds.some(id => n.content.includes(id))
-    );
-    dispatch({ type: 'REMOVE_NOTE', payload: '' }); // 占位，实际在 component 处理
+    // 4. 从收藏列表中移除（原来用 TOGGLE_FAVORITE:'' 占位，实际会把空字符串写进收藏列表）
+    const updatedFavoriteIds = progress.favoriteIds.filter(id => id && !removedQIds.includes(id));
+    dispatch({ type: 'SET_FAVORITES', payload: updatedFavoriteIds });
+
+    // 5. 从笔记中移除（按 questionId 精确匹配，之前用 content.includes 会误删/漏删）
+    const updatedNotes = progress.notes.filter(n => !removedQIds.includes(n.questionId));
+    dispatch({ type: 'SET_NOTES', payload: updatedNotes });
     
     // 6. 更新导入题库列表
     const nextBanks = importedBanks.filter(b => b.id !== bankId);
@@ -728,15 +754,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setImportedQuestions(nextQuestions);
     saveJSON(userKey(currentUser.id, 'importedQuestions'), nextQuestions);
     
-    // 8. 从分类层级移除这些题目
-    setCategoryHierarchy(prev => prev.map(cat => ({
+    // 8. 从分类层级移除这些题目（state 与落盘使用同一份数据，避免写入过滤前的旧值）
+    const nextHierarchy = categoryHierarchy.map(cat => ({
       ...cat,
       questionIds: cat.questionIds.filter(id => !removedQIds.includes(id)),
-    })));
-    saveJSON(userKey(currentUser.id, 'categoryHierarchy'), categoryHierarchy.map(cat => ({
-      ...cat,
-      questionIds: cat.questionIds.filter(id => !removedQIds.includes(id)),
-    })));
+    }));
+    setCategoryHierarchy(nextHierarchy);
+    saveJSON(userKey(currentUser.id, 'categoryHierarchy'), nextHierarchy);
     
     // 9. 从刷题历史中移除相关记录
     const allHistory = practiceHistory.filter(h => !removedQIds.includes(h.questionId));
@@ -747,17 +771,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addCustomQuestion = useCallback((question: Question) => {
     if (!currentUser) return;
-    const next = [...customQuestions, question];
-    setCustomQuestions(next);
-    saveJSON(userKey(currentUser.id, 'customQuestions'), next);
-  }, [currentUser, customQuestions]);
+    const uid = currentUser.id;
+    setCustomQuestions(prev => {
+      const next = [...prev, question];
+      saveJSON(userKey(uid, 'customQuestions'), next);
+      return next;
+    });
+  }, [currentUser]);
 
   const removeCustomQuestion = useCallback((questionId: string) => {
     if (!currentUser) return;
-    const next = customQuestions.filter(q => q.id !== questionId);
-    setCustomQuestions(next);
-    saveJSON(userKey(currentUser.id, 'customQuestions'), next);
-  }, [currentUser, customQuestions]);
+    const uid = currentUser.id;
+    setCustomQuestions(prev => {
+      const next = prev.filter(q => q.id !== questionId);
+      saveJSON(userKey(uid, 'customQuestions'), next);
+      return next;
+    });
+  }, [currentUser]);
 
   // === 知识点操作 ===
   const toggleKnowledgeFavorite = useCallback((knowledgeId: string) => {
@@ -813,9 +843,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const removeCategory = useCallback((id: string) => {
     setCategoryHierarchy(prev => {
-      // 同时删除所有子分类
-      const childIds = prev.filter(c => c.parentId === id).map(c => c.id);
-      return prev.filter(c => c.id !== id && !childIds.includes(c.id));
+      // 同时删除所有后代分类（章 → 节 → 知识点），原来只删除直接子级会留下孤儿节
+      const removed = new Set<string>([id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const c of prev) {
+          if (c.parentId && removed.has(c.parentId) && !removed.has(c.id)) {
+            removed.add(c.id);
+            changed = true;
+          }
+        }
+      }
+      return prev.filter(c => !removed.has(c.id));
     });
   }, []);
 
