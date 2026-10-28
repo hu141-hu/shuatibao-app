@@ -9,7 +9,8 @@ interface AddQuestionModalProps {
   onAdd: (question: Question) => void;
 }
 
-const CATEGORIES = ['常识判断', '逻辑推理', '言语理解', '数量关系'];
+// 手动加题的默认分类（与内置题库一致）
+const CATEGORIES = ['教育学'];
 
 export default function AddQuestionModal({ isOpen, onClose, onAdd }: AddQuestionModalProps) {
   const [questionText, setQuestionText] = useState('');
@@ -19,7 +20,7 @@ export default function AddQuestionModal({ isOpen, onClose, onAdd }: AddQuestion
   const [optionD, setOptionD] = useState('');
   const [answer, setAnswer] = useState('0');
   const [explanation, setExplanation] = useState('');
-  const [category, setCategory] = useState('常识判断');
+  const [category, setCategory] = useState('教育学');
   const [difficulty, setDifficulty] = useState(2);
   const [resultMsg, setResultMsg] = useState('');
   const [resultType, setResultType] = useState<'success' | 'error'>('success');
@@ -33,7 +34,7 @@ export default function AddQuestionModal({ isOpen, onClose, onAdd }: AddQuestion
     setOptionD('');
     setAnswer('0');
     setExplanation('');
-    setCategory('常识判断');
+    setCategory('教育学');
     setDifficulty(2);
     setShowResult(false);
     setResultMsg('');

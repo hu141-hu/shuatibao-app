@@ -8,12 +8,16 @@ interface StatsChartsProps {
   days?: number;
 }
 
+// 统计图按题目分类（当前题库以「节」为分类），未列出的分类按顺序取色
 const categoryColors: Record<string, string> = {
-  '常识判断': '#3B82F6',
-  '逻辑推理': '#8B5CF6',
-  '言语理解': '#22C55E',
-  '数量关系': '#F97316',
+  '教育学': '#3B82F6',
 };
+const defaultColorPalette = ['#3B82F6', '#8B5CF6', '#22C55E', '#F97316', '#EC4899', '#14B8A6', '#EAB308'];
+
+/** 分类配色：优先用预设色，否则按名称稳定取色板中的颜色 */
+function colorOf(name: string, index: number): string {
+  return categoryColors[name] || defaultColorPalette[index % defaultColorPalette.length];
+}
 
 function formatDate(dateStr: string) {
   const d = new Date(dateStr);
@@ -206,11 +210,11 @@ export default function StatsCharts({ records, days = 7 }: StatsChartsProps) {
                 background: totalCategory > 0
                   ? `conic-gradient(${(() => {
                       let offset = 0;
-                      return categoryStats.map(c => {
+                      return categoryStats.map((c, index) => {
                         const start = (offset / totalCategory) * 360;
                         offset += c.value;
                         const end = (offset / totalCategory) * 360;
-                        return `${categoryColors[c.name] || '#94a3b8'} ${start}deg ${end}deg`;
+                        return `${colorOf(c.name, index)} ${start}deg ${end}deg`;
                       }).join(', ');
                     })()})`
                   : '#f3f4f6'
@@ -221,7 +225,7 @@ export default function StatsCharts({ records, days = 7 }: StatsChartsProps) {
                 <div key={c.name} className="flex items-center gap-2">
                   <div
                     className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: categoryColors[c.name] || '#94a3b8' }}
+                    style={{ backgroundColor: colorOf(c.name, categoryStats.indexOf(c)) }}
                   />
                   <span className="text-xs text-gray-600 dark:text-slate-400 flex-1">{c.name}</span>
                   <span className="text-xs font-medium text-gray-800 dark:text-slate-200">{c.value}题</span>

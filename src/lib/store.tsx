@@ -704,8 +704,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (idx !== -1) {
         updated[idx] = { ...updated[idx], questionIds: [...updated[idx].questionIds, ...qIds] };
       } else {
-        // 找不到分类，加入默认常识判断章
-        const csIdx = updated.findIndex(c => c.id === 'cat-chapter-cs');
+        // 找不到分类，加入内置题库的顶级目录（教育学）
+        const csIdx = updated.findIndex(c => c.id === 'cat-edu');
         if (csIdx !== -1) {
           updated[csIdx] = { ...updated[csIdx], questionIds: [...updated[csIdx].questionIds, ...qIds] };
         }

@@ -248,7 +248,7 @@ export function parseMDFile(content: string, bankId: string): { questions: Quest
 
     questions.push({
       id,
-      category: '常识判断',
+      category: '教育学',
       difficulty: 2,
       question: raw.question,
       options: raw.options,

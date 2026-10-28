@@ -7,7 +7,7 @@ import UpdateChecker from "@/components/UpdateChecker";
 
 export const metadata: Metadata = {
   title: "刷题宝 - 智能刷题学习平台",
-  description: "移动端优先的PWA刷题应用，支持常识判断、逻辑推理、言语理解、数量关系等多种题型",
+  description: "移动端优先的PWA刷题应用，内置《3500题》上册教育学题库（1083 题，支持单选/多选/判断）",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

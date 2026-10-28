@@ -7,10 +7,6 @@ import { getQuestionById } from '@/data/questions';
 
 const categoryColors: Record<string, { bg: string; text: string }> = {
   '教育学': { bg: 'bg-emerald-50', text: 'text-emerald-600' },
-  '常识判断': { bg: 'bg-blue-50', text: 'text-blue-600' },
-  '逻辑推理': { bg: 'bg-purple-50', text: 'text-purple-600' },
-  '言语理解': { bg: 'bg-green-50', text: 'text-green-600' },
-  '数量关系': { bg: 'bg-orange-50', text: 'text-orange-600' },
 };
 
 function renderMarkdown(text: string): string {
@@ -89,7 +85,7 @@ export default function KnowledgeDetailClient({ id }: { id: string }) {
     );
   }
 
-  const colors = categoryColors[knowledge.category] || categoryColors['常识判断'];
+  const colors = categoryColors[knowledge.category] || categoryColors['教育学'];
 
   return (
     <div className="px-4 pt-6 pb-4 space-y-4">

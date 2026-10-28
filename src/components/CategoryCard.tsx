@@ -9,10 +9,8 @@ interface CategoryCardProps {
 }
 
 const iconMap: Record<string, string> = {
-  '常识判断': '🌍',
-  '逻辑推理': '🧩',
-  '言语理解': '📝',
-  '数量关系': '🔢',
+  '教育学': '📚',
+  '教育综合知识': '🎓',
 };
 
 export default function CategoryCard({ name, total, completed, icon, onClick }: CategoryCardProps) {

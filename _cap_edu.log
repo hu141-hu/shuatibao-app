@@ -1,0 +1,19 @@
+√ Copying web assets from out to android\app\src\main\assets\public in 414.98ms
+√ Creating capacitor.config.json in android\app\src\main\assets in 39.45ms
+√ copy android in 621.62ms
+√ Updating Android plugins in 6.25ms
+[info] Found 2 Capacitor plugins for android:
+       @capacitor/browser@8.0.4
+       @capacitor/network@8.0.1
+× update android - failed!
+[error] Error: [safe-delete][SAFE_DELETE_BULK_CONFIRM_REQUIRED] {"count":1285,"threshold":50,"scope":"turn","targets":["E:\\deepseek\\刷题宝\\网页版\\quiz-app\\android\\capacitor-cordova-android-plugins"],"targetCount":1}
+        at checkBulkDeleteGuard (E:\软件安装\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:243:19)
+        at tryTrash (E:\软件安装\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:595:5)
+        at tryRm (E:\软件安装\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:806:5)
+        at Object.wrappedRm [as rm] (E:\软件安装\WorkBuddy\resources\app.asar.unpacked\cli\vendor\shim\node-safe-delete-shim.cjs:834:13)
+        at remove (E:\deepseek\刷题宝\网页版\quiz-app\node_modules\fs-extra\lib\remove\index.js:7:6)
+        at E:\deepseek\刷题宝\网页版\quiz-app\node_modules\universalify\index.js:9:12
+        at new Promise (<anonymous>)
+        at remove (E:\deepseek\刷题宝\网页版\quiz-app\node_modules\universalify\index.js:7:14)
+        at removePluginsNativeFiles (E:\deepseek\刷题宝\网页版\quiz-app\node_modules\@capacitor\cli\dist\android\update.js:291:33)
+        at updateAndroid (E:\deepseek\刷题宝\网页版\quiz-app\node_modules\@capacitor\cli\dist\android\update.js:26:11)

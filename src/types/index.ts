@@ -69,7 +69,7 @@ export interface QuizResult {
   questionResults: { questionId: string; selected: number; isCorrect: boolean }[];
 }
 
-export type Category = '常识判断' | '逻辑推理' | '言语理解' | '数量关系';
+export type Category = '教育学' | (string & {});
 
 // 题库分类层级
 export interface CategoryHierarchy {

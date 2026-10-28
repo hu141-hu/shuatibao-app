@@ -15,12 +15,19 @@ import {
   correctIndices,
   answerText,
 } from '@/lib/answerUtils';
-const CATEGORIES = ['全部', '常识判断', '逻辑推理', '言语理解', '数量关系'];
+
 
 export default function WrongQuestionsPage() {
   const router = useRouter();
   const { wrongQuestions, allQuestions, removeWrongQuestion, retryWrongQuestion } = useStore();
   const [selectedCategory, setSelectedCategory] = useState('全部');
+
+  // 分类筛选：从实际题库动态派生
+  const CATEGORIES = useMemo(() => {
+    const set = new Set<string>();
+    for (const q of allQuestions) set.add(q.category || '未分类');
+    return ['全部', ...Array.from(set)];
+  }, [allQuestions]);
   const [retryingId, setRetryingId] = useState<string | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
   // 多选题勾选项
