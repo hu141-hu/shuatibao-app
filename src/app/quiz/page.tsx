@@ -10,9 +10,14 @@ import ExplanationPanel from '@/components/ExplanationPanel';
 import FavoriteButton from '@/components/FavoriteButton';
 import AiChat from '@/components/AiChat';
 import CustomQuizModal, { QuizMode } from '@/components/CustomQuizModal';
+import QuizBuilderModal from '@/components/QuizBuilderModal';
 import AnswerSheet from '@/components/AnswerSheet';
 import { useSwipeNav } from '@/lib/useSwipeNav';
 import { getChildren, getCategoryQuestions, getMasteryLevel, getCategoryStats, shuffleQuestions } from '@/lib/categoryUtils';
+import {
+  buildQuizByPlan, restorePlanQuestions, quizPlanStorageKey,
+  type QuizPlanItem, type SavedQuizPlan,
+} from '@/lib/quizBuilder';
 import {
   OPTION_LABELS as labels,
   isMultiQuestion,
@@ -68,7 +73,13 @@ function QuizContent() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [quizMode, setQuizMode] = useState<QuizMode>('practice');
   const [showCustom, setShowCustom] = useState(false);
+  const [showBuilder, setShowBuilder] = useState(false);
   const [showAnswerSheet, setShowAnswerSheet] = useState(false);
+  // 多章节出题：当前答题卡计划 / 抽题提示 / 未答完的存档
+  const [activePlan, setActivePlan] = useState<QuizPlanItem[]>([]);
+  const [planWarnings, setPlanWarnings] = useState<string[]>([]);
+  const [savedPlan, setSavedPlan] = useState<SavedQuizPlan | null>(null);
+  const [builderError, setBuilderError] = useState('');
 
   // === 断点续刷：按目录记录最后一题的 id ===
   const lastKey = currentUser ? `${currentUser.id}_categoryLast` : '';
@@ -126,6 +137,12 @@ function QuizContent() {
     setSelectedCategoryIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
   };
 
+  const toggleSelectAll = (ids: string[]) => {
+    if (ids.length === 0) return;
+    const allSelected = ids.every(id => selectedCategoryIds.includes(id));
+    setSelectedCategoryIds(allSelected ? [] : ids);
+  };
+
   const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
@@ -139,7 +156,7 @@ function QuizContent() {
 
   // 开始一轮刷题：必须同时重置下标/作答记录，
   // 否则上一轮停在第 5 题、换一个只有 3 题的分类时 currentIndex 越界，currentQ 为 undefined 直接白屏
-  const startQuiz = useCallback((qs: Question[], startAtId?: string, mode: QuizMode = 'practice') => {
+  const startQuiz = useCallback((qs: Question[], startAtId?: string, mode: QuizMode = 'practice', plan: QuizPlanItem[] = []) => {
     // 有断点时从上次那道题继续
     const idx = startAtId ? qs.findIndex(q => q.id === startAtId) : 0;
     setQuizQuestions(qs.length > 0 ? qs : []);
@@ -148,6 +165,9 @@ function QuizContent() {
     setShowResult(false);
     setResults([]);
     setQuizMode(mode);
+    // plan 为空 = 普通刷题，需清掉上一张答题卡的分组信息
+    setActivePlan(plan);
+    if (plan.length === 0) setPlanWarnings([]);
     setQuestionStartTime(Date.now());
     setStartTime(Date.now());
   }, []);
@@ -199,6 +219,8 @@ function QuizContent() {
     setSelectedSectionId(null);
     setSelectedKnowledgeId(null);
     setQuizNotice(null);
+    // 进入下一级时清空勾选，避免章与节混选造成"先到先得"后数量被吃掉
+    setSelectedCategoryIds([]);
     const sections = getSections(chapterId);
     if (sections.length === 0) {
       // 没有子级，直接开刷：默认跳过已做
@@ -215,6 +237,7 @@ function QuizContent() {
     setSelectedSectionId(sectionId);
     setSelectedKnowledgeId(null);
     setQuizNotice(null);
+    setSelectedCategoryIds([]);
     const knowledges = getKnowledges(sectionId);
     if (knowledges.length === 0) {
       const { all, rest } = pickPracticePool(sectionId);
@@ -261,6 +284,188 @@ function QuizContent() {
     // 续刷用全量题目，保证断点题一定在列表里
     startQuiz(getQuestionsByCategoryId(cat.id), lastMap[cat.id]);
   }, [categoryHierarchy, getQuestionsByCategoryId, lastMap, startQuiz]);
+
+  // === 多章节出题：答题卡存档（未答完自动保存，回到列表可恢复） ===
+  const planKey = currentUser ? quizPlanStorageKey(currentUser.id) : '';
+
+  useEffect(() => {
+    if (!planKey || quizQuestions.length > 0) return;
+    try {
+      const raw = JSON.parse(localStorage.getItem(planKey) || 'null') as SavedQuizPlan | null;
+      if (raw && Array.isArray(raw.questionIds) && raw.questionIds.length > 0) setSavedPlan(raw);
+      else setSavedPlan(null);
+    } catch { setSavedPlan(null); }
+  }, [planKey, quizQuestions.length]);
+
+  useEffect(() => {
+    if (!planKey || activePlan.length === 0 || quizQuestions.length === 0) return;
+    const data: SavedQuizPlan = {
+      plan: activePlan,
+      questionIds: quizQuestions.map(q => q.id),
+      currentIndex,
+      results,
+      savedAt: Date.now(),
+    };
+    try { localStorage.setItem(planKey, JSON.stringify(data)); } catch { /* 配额不足忽略 */ }
+  }, [planKey, activePlan, quizQuestions, currentIndex, results]);
+
+  const clearSavedPlan = useCallback(() => {
+    if (planKey) {
+      try { localStorage.removeItem(planKey); } catch { /* ignore */ }
+    }
+    setSavedPlan(null);
+    setActivePlan([]);
+  }, [planKey]);
+
+  /** 按每章设定的题量生成答题卡 */
+  const handleStartPlanned = (
+    items: { categoryId: string; count: number }[],
+    mode: QuizMode,
+    includeDone: boolean
+  ) => {
+    const selections = items.map(i => ({
+      categoryId: i.categoryId,
+      categoryName: categoryHierarchy.find(c => c.id === i.categoryId)?.name || '未命名章节',
+      requested: i.count,
+    }));
+    const { questions, plan, warnings } = buildQuizByPlan(
+      categoryHierarchy, allQuestions, practiceHistory, selections, { includeDone }
+    );
+
+    setShowBuilder(false);
+    setSelectedCategoryIds([]);
+    setBuilderError('');
+
+    if (questions.length === 0) {
+      setBuilderError(
+        includeDone
+          ? '所选章节没有题目，请检查目录或重新导入题库'
+          : '所选章节没有可用题目：可能已全部刷完，可开启「包含已刷过的题」再试'
+      );
+      return;
+    }
+
+    setPlanWarnings(warnings);
+    setSelectedChapterId('全部');
+    setSelectedSectionId(null);
+    setSelectedKnowledgeId(null);
+    startQuiz(questions, undefined, mode, plan);
+  };
+
+  /** 恢复未答完的答题卡 */
+  const resumeSavedPlan = () => {
+    if (!savedPlan) return;
+    const qs = restorePlanQuestions(savedPlan.questionIds, allQuestions);
+    if (qs.length === 0) {
+      clearSavedPlan();
+      setBuilderError('上次的答题卡题目已不存在，存档已清除');
+      return;
+    }
+    const idx = Math.min(Math.max(savedPlan.currentIndex, 0), qs.length - 1);
+    setSelectedChapterId('全部');
+    setSelectedSectionId(null);
+    setSelectedKnowledgeId(null);
+    startQuiz(qs, undefined, 'practice', savedPlan.plan);
+    setCurrentIndex(idx);
+    setResults(savedPlan.results);
+    const prev = savedPlan.results.find(r => r.questionId === qs[idx]?.id);
+    setSelectedAnswer(prev ? prev.selected : null);
+    setShowResult(Boolean(prev));
+  };
+
+  // 答题卡按章节分组（用于 AnswerSheet）
+  const answerGroups = useMemo(() => {
+    if (activePlan.length === 0) return undefined;
+    let cursor = 0;
+    const groups = activePlan
+      .filter(p => p.actual > 0)
+      .map(p => {
+        const indexes = Array.from({ length: p.actual }, (_, i) => cursor + i);
+        cursor += p.actual;
+        return { name: p.categoryName, indexes };
+      });
+    // 题目被删除等情况导致实际题数少于计划时，补一个兜底分组，避免答题卡漏题
+    if (cursor < quizQuestions.length) {
+      groups.push({
+        name: '其他',
+        indexes: Array.from({ length: quizQuestions.length - cursor }, (_, i) => cursor + i),
+      });
+    }
+    return groups.length > 0 ? groups : undefined;
+  }, [activePlan, quizQuestions.length]);
+
+  // 当前题属于哪一章（多章节混合出题时显示）
+  const currentPlanItem = useMemo(() => {
+    if (activePlan.length === 0) return null;
+    let cursor = 0;
+    for (const p of activePlan.filter(item => item.actual > 0)) {
+      if (currentIndex < cursor + p.actual) return p;
+      cursor += p.actual;
+    }
+    return null;
+  }, [activePlan, currentIndex]);
+
+  // 三级目录共用的底部操作条与弹窗（章 / 节 / 知识点列表都能出题）
+  const selectionBar = selectedCategoryIds.length > 0 ? (
+    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[480px] px-4 z-40 flex gap-2">
+      <button
+        onClick={() => setShowCustom(true)}
+        className="flex-1 py-3 rounded-2xl bg-gray-900/90 dark:bg-slate-700 text-white text-xs font-semibold shadow-xl backdrop-blur"
+      >
+        🎛 自定义（{customPool.length} 题）
+      </button>
+      <button
+        onClick={() => { setBuilderError(''); setShowBuilder(true); }}
+        className="flex-1 py-3 rounded-2xl bg-emerald-600 text-white text-xs font-semibold shadow-xl"
+      >
+        🧩 按量出题
+      </button>
+    </div>
+  ) : null;
+
+  const customModal = (
+    <CustomQuizModal
+      isOpen={showCustom}
+      onClose={() => setShowCustom(false)}
+      questions={customPool}
+      doneIds={doneIds}
+      wrongIds={wrongIds}
+      onStart={(qs, mode) => {
+        setShowCustom(false);
+        if (qs.length === 0) return;
+        setSelectedCategoryIds([]);
+        setSelectedSectionId(null);
+        setSelectedKnowledgeId(null);
+        // selectedChapterId 必须是非空值，否则会停在章列表分支
+        setSelectedChapterId('全部');
+        startQuiz(qs, undefined, mode);
+      }}
+    />
+  );
+
+  const builderSelections = useMemo(() => {
+    return selectedCategoryIds.map(id => {
+      const cat = categoryHierarchy.find(c => c.id === id);
+      const all = getQuestionsByCategoryId(id);
+      return {
+        id,
+        name: cat?.name || '未命名',
+        level: (cat?.level || 'chapter') as 'chapter' | 'section' | 'knowledge',
+        available: all.filter(q => !doneSet.has(q.id)).length,
+        availableAll: all.length,
+      };
+    });
+  }, [selectedCategoryIds, categoryHierarchy, getQuestionsByCategoryId, doneSet]);
+
+  const builderModal = (
+    <QuizBuilderModal
+      key={selectedCategoryIds.join(',') || 'empty'}
+      isOpen={showBuilder}
+      onClose={() => setShowBuilder(false)}
+      selections={builderSelections}
+      onStart={handleStartPlanned}
+    />
+  );
 
   // 任意层级都可以直接刷本级：优先只刷未做，全部刷完则按"再刷一遍"处理
   const startLevelPractice = (catId: string) => {
@@ -416,6 +621,7 @@ function QuizContent() {
       goToQuestion(currentIndex + 1);
     } else if (quizMode === 'recite') {
       // 背题模式不产生作答记录，刷完直接回目录
+      clearSavedPlan();
       handleBack();
       return;
     } else {
@@ -433,9 +639,11 @@ function QuizContent() {
         categoryId: activeCategoryId || '',
         from: fromHome ? 'home' : '',
       });
+      // 答题卡已完成，清掉存档
+      clearSavedPlan();
       router.push(`/result?${params.toString()}`);
     }
-  }, [currentIndex, quizQuestions, startTime, results, router, selectedChapterId, activeCategoryId, goToQuestion, quizMode, handleBack, fromHome]);
+  }, [currentIndex, quizQuestions, startTime, results, router, selectedChapterId, activeCategoryId, goToQuestion, quizMode, handleBack, fromHome, clearSavedPlan]);
 
   // 滑动手势：中间区左滑下一题/右滑上一题；左边距区左滑返回；右边距区右滑无效
   const swipeRef = useSwipeNav<HTMLDivElement>({
@@ -448,9 +656,46 @@ function QuizContent() {
   if (!selectedChapterId) {
     return (
       <>
-      <div className="px-4 pt-6 pb-4 space-y-4">
-        <h1 className="text-xl font-bold text-gray-800 dark:text-slate-200">⚡ 刷题模式</h1>
-        <p className="text-sm text-gray-500 dark:text-slate-400">选择一个分类开始刷题；勾选左侧方框可批量自定义</p>
+      <div className={`px-4 pt-6 space-y-4 ${selectedCategoryIds.length > 0 ? 'pb-24' : 'pb-4'}`}>
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-gray-800 dark:text-slate-200">⚡ 刷题模式</h1>
+          <button
+            onClick={() => toggleSelectAll(chapters.map(c => c.id))}
+            className="text-xs text-emerald-600 dark:text-emerald-400 font-medium px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30"
+          >
+            {chapters.every(c => selectedCategoryIds.includes(c.id)) ? '取消全选' : '全选'}
+          </button>
+        </div>
+        <p className="text-sm text-gray-500 dark:text-slate-400">选择一个分类开始刷题；勾选左侧方框可批量组卷</p>
+
+        {builderError && (
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-3">
+            <p className="text-xs text-red-600 dark:text-red-400">{builderError}</p>
+          </div>
+        )}
+
+        {savedPlan && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-2xl p-4 space-y-2">
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">有一张未完成的答题卡</p>
+            <p className="text-xs text-amber-700/80 dark:text-amber-400/80">
+              {savedPlan.plan.filter(p => p.actual > 0).length} 个章节 · 共 {savedPlan.questionIds.length} 题 · 已答 {savedPlan.results.length} 题
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={resumeSavedPlan}
+                className="px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-medium"
+              >
+                继续答题
+              </button>
+              <button
+                onClick={clearSavedPlan}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300 text-xs"
+              >
+                放弃
+              </button>
+            </div>
+          </div>
+        )}
         <div className="space-y-3">
           {chapters.map((ch) => {
             const sections = getSections(ch.id);
@@ -507,36 +752,11 @@ function QuizContent() {
           </button>
         </div>
 
-        {/* 勾选目录后出现：自定义刷题入口 */}
-        {selectedCategoryIds.length > 0 && (
-          <div className="fixed bottom-20 left-1/2 -translate-x-1/2 w-full max-w-[480px] px-4 z-40">
-            <button
-              onClick={() => setShowCustom(true)}
-              className="w-full py-3.5 rounded-2xl bg-gray-900/90 dark:bg-emerald-600 text-white text-sm font-semibold shadow-xl backdrop-blur"
-            >
-              🎛 自定义刷题 · 已选 {selectedCategoryIds.length} 个目录（{customPool.length} 题）
-            </button>
-          </div>
-        )}
+        {selectionBar}
       </div>
 
-      <CustomQuizModal
-        isOpen={showCustom}
-        onClose={() => setShowCustom(false)}
-        questions={customPool}
-        doneIds={doneIds}
-        wrongIds={wrongIds}
-        onStart={(qs, mode) => {
-          setShowCustom(false);
-          if (qs.length === 0) return;
-          setSelectedCategoryIds([]);
-          setSelectedSectionId(null);
-          setSelectedKnowledgeId(null);
-          // selectedChapterId 必须是非空值，否则会停在章列表分支
-          setSelectedChapterId('全部');
-          startQuiz(qs, undefined, mode);
-        }}
-      />
+      {customModal}
+      {builderModal}
       </>
     );
   }
@@ -551,14 +771,20 @@ function QuizContent() {
       const chapterStats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, selectedChapterId);
       const chapterRemaining = Math.max(chapterStats.total - chapterStats.done, 0);
       return (
-        <div className="px-4 pt-6 pb-4 space-y-4">
+        <div className={`px-4 pt-6 space-y-4 ${selectedCategoryIds.length > 0 ? 'pb-24' : 'pb-4'}`}>
           <div className="flex items-center gap-3">
             <button onClick={handleBack} aria-label="返回" className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </button>
-            <h1 className="text-lg font-bold text-gray-800 dark:text-slate-200">{currentChapter?.name || '选择节'}</h1>
+            <h1 className="flex-1 min-w-0 truncate text-lg font-bold text-gray-800 dark:text-slate-200">{currentChapter?.name || '选择节'}</h1>
+            <button
+              onClick={() => toggleSelectAll(sections.map(s => s.id))}
+              className="text-xs text-emerald-600 dark:text-emerald-400 font-medium px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30 shrink-0"
+            >
+              {sections.every(s => selectedCategoryIds.includes(s.id)) ? '取消全选' : '全选'}
+            </button>
           </div>
-          <p className="text-sm text-gray-500 dark:text-slate-400">逐级进入，或在下方直接刷整章</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">勾选左侧方框，可为每个子目录指定题量出卷</p>
           {quizNotice && (
             <QuizNotice
               notice={quizNotice}
@@ -572,21 +798,28 @@ function QuizContent() {
               const stats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, sec.id);
               return (
                 <div key={sec.id} className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-700 overflow-hidden">
-                  <button
-                    onClick={() => handleSelectSection(sec.id)}
-                    className="w-full p-4 text-left hover:bg-gray-50 dark:hover:bg-slate-700/40 transition-colors"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="font-medium text-gray-800 dark:text-slate-200 truncate">{sec.name}</h3>
-                        <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
-                          {stats.done}/{stats.total} 题{knowledges.length > 0 ? ` · ${knowledges.length} 个知识点` : ''}
-                        </p>
-                        <MasteryDots level={getMasteryLevel(stats)} />
+                  <div className="flex items-center gap-3 p-4">
+                    <SelectCheckbox
+                      checked={selectedCategoryIds.includes(sec.id)}
+                      onChange={() => toggleCategorySelect(sec.id)}
+                      label={selectedCategoryIds.includes(sec.id) ? '取消选择此节' : '选择此节'}
+                    />
+                    <button
+                      onClick={() => handleSelectSection(sec.id)}
+                      className="flex-1 min-w-0 text-left"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <h3 className="font-medium text-gray-800 dark:text-slate-200 truncate">{sec.name}</h3>
+                          <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+                            {stats.done}/{stats.total} 题{knowledges.length > 0 ? ` · ${knowledges.length} 个知识点` : ''}
+                          </p>
+                          <MasteryDots level={getMasteryLevel(stats)} />
+                        </div>
+                        <span className="text-blue-500 text-xl shrink-0">→</span>
                       </div>
-                      <span className="text-blue-500 text-xl shrink-0">→</span>
-                    </div>
-                  </button>
+                    </button>
+                  </div>
                   {lastMap[sec.id] && (
                     <button
                       onClick={() => resumeQuiz(sec.id)}
@@ -608,6 +841,9 @@ function QuizContent() {
               <p className="text-xs text-emerald-100 mt-0.5">共 {chapterStats.total} 道题 · 已做 {chapterStats.done} 道</p>
             </button>
           </div>
+          {selectionBar}
+          {customModal}
+          {builderModal}
         </div>
       );
     }
@@ -620,14 +856,20 @@ function QuizContent() {
       const sectionStats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, selectedSectionId);
       const sectionRemaining = Math.max(sectionStats.total - sectionStats.done, 0);
       return (
-        <div className="px-4 pt-6 pb-4 space-y-4">
+        <div className={`px-4 pt-6 space-y-4 ${selectedCategoryIds.length > 0 ? 'pb-24' : 'pb-4'}`}>
           <div className="flex items-center gap-3">
             <button onClick={handleBack} aria-label="返回" className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </button>
-            <h1 className="text-lg font-bold text-gray-800 dark:text-slate-200">{currentSection?.name || '选择知识点'}</h1>
+            <h1 className="flex-1 min-w-0 truncate text-lg font-bold text-gray-800 dark:text-slate-200">{currentSection?.name || '选择知识点'}</h1>
+            <button
+              onClick={() => toggleSelectAll(knowledges.map(k => k.id))}
+              className="text-xs text-emerald-600 dark:text-emerald-400 font-medium px-2 py-1 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/30 shrink-0"
+            >
+              {knowledges.every(k => selectedCategoryIds.includes(k.id)) ? '取消全选' : '全选'}
+            </button>
           </div>
-          <p className="text-sm text-gray-500 dark:text-slate-400">逐级进入，或在下方直接刷整节</p>
+          <p className="text-sm text-gray-500 dark:text-slate-400">勾选左侧方框，可为每个子目录指定题量出卷</p>
           {quizNotice && (
             <QuizNotice
               notice={quizNotice}
@@ -639,20 +881,29 @@ function QuizContent() {
             {knowledges.map((kn) => {
               const stats = getCategoryStats(categoryHierarchy, allQuestions, practiceHistory, kn.id);
               return (
-                <button
+                <div
                   key={kn.id}
-                  onClick={() => handleSelectKnowledge(kn.id)}
-                  className="w-full bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-700 transition-all text-left card-hover"
+                  className="w-full bg-white dark:bg-slate-800 rounded-2xl p-4 shadow-sm border border-gray-100 dark:border-slate-700 hover:shadow-md hover:border-blue-200 dark:hover:border-blue-700 transition-all card-hover flex items-center gap-3"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="font-medium text-gray-800 dark:text-slate-200 truncate">{kn.name}</h3>
-                      <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{stats.done}/{stats.total} 题</p>
-                      <MasteryDots level={getMasteryLevel(stats)} />
+                  <SelectCheckbox
+                    checked={selectedCategoryIds.includes(kn.id)}
+                    onChange={() => toggleCategorySelect(kn.id)}
+                    label={selectedCategoryIds.includes(kn.id) ? '取消选择此知识点' : '选择此知识点'}
+                  />
+                  <button
+                    onClick={() => handleSelectKnowledge(kn.id)}
+                    className="flex-1 min-w-0 text-left"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="font-medium text-gray-800 dark:text-slate-200 truncate">{kn.name}</h3>
+                        <p className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">{stats.done}/{stats.total} 题</p>
+                        <MasteryDots level={getMasteryLevel(stats)} />
+                      </div>
+                      <span className="text-blue-500 text-xl shrink-0">→</span>
                     </div>
-                    <span className="text-blue-500 text-xl shrink-0">→</span>
-                  </div>
-                </button>
+                  </button>
+                </div>
               );
             })}
             <button
@@ -665,6 +916,9 @@ function QuizContent() {
               <p className="text-xs text-blue-100 mt-0.5">共 {sectionStats.total} 道题 · 已做 {sectionStats.done} 道</p>
             </button>
           </div>
+          {selectionBar}
+          {customModal}
+          {builderModal}
         </div>
       );
     }
@@ -692,7 +946,7 @@ function QuizContent() {
   const isConfused = confusedQuestions.includes(currentQ.id);
 
   return (
-    <div ref={swipeRef} className="px-4 pt-6 pb-4 space-y-4">
+    <div ref={swipeRef} className={`px-4 pt-6 space-y-4 ${selectedCategoryIds.length > 0 ? 'pb-24' : 'pb-4'}`}>
       {/* 顶部进度条 */}
       <div className="flex items-center gap-3">
         <button onClick={handleBack} aria-label="返回" className="text-gray-400 dark:text-slate-500 hover:text-gray-600 dark:hover:text-slate-300 min-w-[44px] min-h-[44px] flex items-center justify-center">
@@ -712,6 +966,31 @@ function QuizContent() {
           答题卡
         </button>
       </div>
+
+      {/* 多章节混合出题：当前所属章节 */}
+      {currentPlanItem && (
+        <div className="flex items-center justify-center gap-2 -mt-1">
+          <span className="text-[11px] text-gray-500 dark:text-slate-400 bg-gray-100 dark:bg-slate-700/60 px-2 py-0.5 rounded-full">
+            {currentPlanItem.categoryName}
+          </span>
+          <span className="text-[11px] text-gray-400">本章 {currentPlanItem.actual} 题</span>
+        </div>
+      )}
+
+      {/* 抽题降级提示（某章题量不足 / 无可用题） */}
+      {planWarnings.length > 0 && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-2.5 space-y-1">
+          {planWarnings.slice(0, 3).map((w, i) => (
+            <p key={i} className="text-xs text-amber-700 dark:text-amber-300">· {w}</p>
+          ))}
+          {planWarnings.length > 3 && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">还有 {planWarnings.length - 3} 条…</p>
+          )}
+          <button onClick={() => setPlanWarnings([])} className="text-[11px] text-amber-600 dark:text-amber-400 underline">
+            知道了
+          </button>
+        </div>
+      )}
 
       {/* 题目卡片 + 收藏/不会按钮 */}
       <div className="relative">
@@ -835,6 +1114,7 @@ function QuizContent() {
         results={results}
         onJump={goToQuestion}
         onClose={() => setShowAnswerSheet(false)}
+        groups={answerGroups}
       />
     </div>
   );
@@ -860,6 +1140,25 @@ function QuizNotice({
         <button onClick={onDismiss} className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-700 text-gray-600 dark:text-slate-300 text-xs">知道了</button>
       </div>
     </div>
+  );
+}
+
+/** 目录多选勾选框（章 / 节 / 知识点通用） */
+function SelectCheckbox({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onChange(); }}
+      aria-label={label}
+      className={`w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+        checked ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-slate-500'
+      }`}
+    >
+      {checked && (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+        </svg>
+      )}
+    </button>
   );
 }
 

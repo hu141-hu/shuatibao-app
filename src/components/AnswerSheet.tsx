@@ -7,6 +7,8 @@ interface AnswerSheetProps {
   results: { questionId: string; selected: number; isCorrect: boolean }[];
   onJump: (index: number) => void;
   onClose: () => void;
+  /** 多章节出题时按章节分组展示 */
+  groups?: { name: string; indexes: number[] }[];
 }
 
 /**
@@ -20,12 +22,36 @@ export default function AnswerSheet({
   results,
   onJump,
   onClose,
+  groups,
 }: AnswerSheetProps) {
   if (!isOpen) return null;
 
   const resultMap = new Map(results.map(r => [r.questionId, r]));
   const answered = results.length;
   const correct = results.filter(r => r.isCorrect).length;
+
+  const renderCell = (idx: number) => {
+    const qid = questionIds[idx];
+    if (!qid) return null;
+    const r = resultMap.get(qid);
+    const isCurrent = idx === currentIndex;
+    const cls = r
+      ? r.isCorrect
+        ? 'bg-emerald-500 text-white border-emerald-500'
+        : 'bg-red-500 text-white border-red-500'
+      : 'bg-gray-50 dark:bg-slate-700 text-gray-500 dark:text-slate-300 border-gray-200 dark:border-slate-600';
+    return (
+      <button
+        key={qid}
+        onClick={() => { onJump(idx); onClose(); }}
+        className={`h-10 rounded-lg border text-sm font-medium transition-all ${cls} ${
+          isCurrent ? 'ring-2 ring-offset-1 ring-emerald-400 dark:ring-offset-slate-800' : ''
+        }`}
+      >
+        {idx + 1}
+      </button>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/50" onClick={onClose}>
@@ -48,28 +74,24 @@ export default function AnswerSheet({
           <span className="text-red-500 dark:text-red-400">答错 {answered - correct}</span>
         </div>
 
-        <div className="grid grid-cols-6 gap-2">
-          {questionIds.map((qid, idx) => {
-            const r = resultMap.get(qid);
-            const isCurrent = idx === currentIndex;
-            const cls = r
-              ? r.isCorrect
-                ? 'bg-emerald-500 text-white border-emerald-500'
-                : 'bg-red-500 text-white border-red-500'
-              : 'bg-gray-50 dark:bg-slate-700 text-gray-500 dark:text-slate-300 border-gray-200 dark:border-slate-600';
-            return (
-              <button
-                key={qid}
-                onClick={() => { onJump(idx); onClose(); }}
-                className={`h-10 rounded-lg border text-sm font-medium transition-all ${cls} ${
-                  isCurrent ? 'ring-2 ring-offset-1 ring-emerald-400 dark:ring-offset-slate-800' : ''
-                }`}
-              >
-                {idx + 1}
-              </button>
-            );
-          })}
-        </div>
+        {groups && groups.length > 0 ? (
+          <div className="space-y-4">
+            {groups.map(g => (
+              <div key={g.name}>
+                <p className="text-xs font-medium text-gray-500 dark:text-slate-400 mb-1.5">
+                  {g.name} · {g.indexes.length} 题
+                </p>
+                <div className="grid grid-cols-6 gap-2">
+                  {g.indexes.map(idx => renderCell(idx))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-6 gap-2">
+            {questionIds.map((_, idx) => renderCell(idx))}
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-3 text-[11px] text-gray-400 dark:text-slate-500 pt-1">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500" />答对</span>
