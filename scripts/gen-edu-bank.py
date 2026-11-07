@@ -1,11 +1,15 @@
 # -*- coding: utf-8 -*-
-"""把《3500题》上册的 Markdown 题库转换为刷题宝 App 的内置数据模块。
+"""把《3500题》上册 + 下册（2026-11-07 扫描）的 Markdown 题库转换为刷题宝 App 内置数据模块。
 
-输入：E:\\deepseek\\题库资料\\3500题上册\\输出\\第NN节-*.md
+输入：
+  E:\\deepseek\\题库资料\\3500题上册\\输出\\第NN节-*.md    （17 节 / 1083 题）
+  E:\\deepseek\\题库资料\\2026-11题库\\输出\\第NN节-*.md （16 节 / 772 题）
 输出：
   src/data/eduQuestions.ts   —— 题目数组（Question[]）
   src/data/eduCategories.ts  —— 三级目录（CategoryHierarchy[]：大标题→章→节）
   src/data/eduKnowledge.ts   —— 每节一个知识点（KnowledgePoint[]）
+
+两册合并到同一棵目录树：教育学 → 14 章/部分 → 33 节，共 1855 题。
 
 用法：python scripts/gen-edu-bank.py
 """
@@ -14,10 +18,15 @@ import re
 import io
 import json
 import glob
+from collections import Counter
 
-SRC = r"E:\deepseek\题库资料\3500题上册\输出"
+SOURCES = [
+    (r"E:\deepseek\题库资料\3500题上册\输出", "上册"),
+    (r"E:\deepseek\题库资料\2026-11题库\输出", "下册"),
+]
 APP = r"E:\deepseek\刷题宝\网页版\quiz-app"
 TOP_TITLE = "教育学"
+MANIFEST_PATH = r"E:\deepseek\题库资料\_edu_manifest_3500.json"
 
 TYPE_MAP = {
     "一、单项选择题": "single",
@@ -45,6 +54,8 @@ def parse_md(path):
         section = chapter
     section = re.sub(r"^第[一二三四五六七八九十]+节\s*", "", section).strip()
     section = re.sub(r"^第[一二三四五六七八九十]+章\s*", "", section).strip()
+    # 下册「第X部分 教师职业道德」等：节名去掉部分前缀，目录更清爽
+    section = re.sub(r"^第[一二三四五六七八九十]+部分\s*", "", section).strip()
 
     # 按题型分组
     groups = {}
@@ -163,20 +174,22 @@ def parse_question(blk, qtype):
 
 
 def main():
-    files = sorted(glob.glob(os.path.join(SRC, "第*.md")))
+    # 两册按「上册 17 节 → 下册 16 节」顺序拼成同一棵目录树，章序号全局连续
+    all_files = []
+    for src_dir, book in SOURCES:
+        for fp in sorted(glob.glob(os.path.join(src_dir, "第*.md"))):
+            all_files.append((fp, book))
     questions = []
     categories = []
-    chapter_order = 0
     seen_chapters = {}
-    sec_counter = 0
     manifest = []
+    book_stats = {book: Counter() for _, book in SOURCES}
 
-    for fp in files:
+    for fp, book in all_files:
         chapter, section, groups = parse_md(fp)
         if not chapter:
             continue
         if chapter not in seen_chapters:
-            sec_counter += 1
             chap_id = "cat-edu-c%d" % len(seen_chapters)
             seen_chapters[chapter] = chap_id
             categories.append({
@@ -192,8 +205,9 @@ def main():
             for q in groups.get(qtype, []):
                 cid = sec_id.replace("cat-edu-c", "c").replace("-s", "s")
                 qid = "edu-%s-%s%d" % (cid, qtype[0], q["no"])
-                manifest.append({"file": os.path.basename(fp), "chapter": chapter,
+                manifest.append({"book": book, "file": os.path.basename(fp), "chapter": chapter,
                                  "section": section, "type": qtype, "no": q["no"], "id": qid})
+                book_stats[book][qtype] += 1
                 item = {
                     "id": qid,
                     "category": section,
@@ -239,7 +253,7 @@ def main():
         print("写出 %s (%d 条)" % (path, len(data)))
 
     q_header = ("// 本文件由 scripts/gen-edu-bank.py 自动生成，请勿手工修改。\n"
-                "// 来源：《3500题》上册（教育学）Markdown 题库，共 %d 题。\n" % len(questions))
+                "// 来源：《3500题》上册 + 下册（2026-11-07 扫描）Markdown 题库，共 %d 题。\n" % len(questions))
     ts(os.path.join(APP, "src/data/eduQuestions.ts"), q_header, "eduQuestions", questions,
        "import { Question } from '@/types';\n", "Question")
 
@@ -275,7 +289,7 @@ def main():
             "relatedQuestionIds": c["questionIds"],
             "importance": 3,
             "isCustom": False,
-            "createdAt": "2026-10-28",
+            "createdAt": "2026-11-07",
         })
     k_header = ("// 本文件由 scripts/gen-edu-bank.py 自动生成，请勿手工修改。\n"
                 "// 每节一份考点清单，可用于「知识点」页面复习。\n")
@@ -283,11 +297,23 @@ def main():
        "import { KnowledgePoint } from '@/types';\n", "KnowledgePoint")
 
     # 清单（供校验用）
-    io.open(r"E:\deepseek\题库资料\3500题上册\_edu_manifest.json", "w", encoding="utf-8").write(
-        json.dumps(manifest, ensure_ascii=False, indent=1))
+    with io.open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        f.write(json.dumps(manifest, ensure_ascii=False, indent=1))
+
+    # ---------- 校验 ----------
+    ids = [q["id"] for q in questions]
+    assert len(ids) == len(set(ids)), "存在重复题目 id"
+    assert all(q["options"] for q in questions), "存在空选项题目"
+    assert all(q["explanation"]["brief"] for q in questions), "存在空解析题目"
+    assert all(0 <= q["answer"] < len(q["options"]) for q in questions), "存在答案下标越界"
+    for q in questions:
+        if q["type"] == "multi":
+            assert len(q.get("answers", [])) >= 2, "多选题答案数异常：%s" % q["id"]
+            assert all(0 <= i < len(q["options"]) for i in q["answers"]), "多选答案越界：%s" % q["id"]
+        if q["type"] == "judge":
+            assert len(q["options"]) == 2, "判断题选项异常：%s" % q["id"]
 
     # ---------- 统计 ----------
-    from collections import Counter
     print("\n=== 生成统计 ===")
     print("章节（大标题→章）：%d 个大标题 / %d 个章 / %d 个节" % (
         len([c for c in categories if c["level"] == "chapter"]),
@@ -295,7 +321,10 @@ def main():
         len([c for c in categories if c["level"] == "knowledge"])))
     print("题目总数：%d" % len(questions))
     print("题型分布：%s" % dict(Counter(q["type"] for q in questions)))
+    for book, cnt in book_stats.items():
+        print("  %s：%d 题 %s" % (book, sum(cnt.values()), dict(cnt)))
     print("知识点：%d 份" % len(kps))
+    print("清单：%s" % MANIFEST_PATH)
 
 
 if __name__ == "__main__":

@@ -102,7 +102,7 @@ const defaultProgress: UserProgress = {
 const DEFAULT_CATEGORIES: CategoryHierarchy[] = eduCategories;
 
 /** 内置题库版本：变更时会刷新设备上的内置目录 */
-const BANK_VERSION = 'edu-3500-v1';
+const BANK_VERSION = 'edu-3500-v2'; // v2：合并《3500题》下册（2026-11-07 扫描，+772 题）
 /** 旧版内置目录 id 前缀（迁移时丢弃） */
 const OLD_BUILTIN_PREFIX = 'cat-chapter-';
 
