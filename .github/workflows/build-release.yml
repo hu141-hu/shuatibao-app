@@ -1,10 +1,12 @@
 name: Build Release APK
 
-# 打 Tag（如 v1.2.0）并推送时自动构建 APK 并发布到 GitHub Releases
+# 打 Tag（如 v1.4.2）并推送时自动构建 APK 并上传到同版本 Release。
+# 也可以在 Actions 页面手动运行（workflow_dispatch）：只构建 + 上传 artifact，不动 Release。
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -37,7 +39,18 @@ jobs:
           java-version: 21
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        # 不用 android-actions/setup-android@v3：它会执行 `sdkmanager tools`，
+        # 而 Google 已下线 tools 包，在 runner 自带的 cmdline-tools 16.0 上必然报
+        # "Warning: Failed to find package 'tools'" 并以 exit code 1 失败（v1.4.1/v1.4.2 都是这么挂的）。
+        # runner 镜像本身已带 Android SDK，这里只补齐项目需要的 platform / build-tools。
+        run: |
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager | sort | tail -1)"
+          echo "使用 sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Sync Capacitor
         run: npx cap sync
@@ -74,7 +87,9 @@ jobs:
           path: android/app/build/outputs/apk/release/app-release.apk
 
       - name: Publish GitHub Release
+        # 只在推 Tag 时发布；手动运行不碰 Release。
+        # 不启用 generate_release_notes：Release 说明是手写的，避免被自动生成的覆盖。
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/apk/release/app-release.apk
-          generate_release_notes: true
