@@ -47,6 +47,15 @@ android/build/
 android/capacitor-cordova-android-plugins/build/
 android/local.properties
 
+# ios build outputs 与 cap sync 生成的前端资源
+ios/App/App/public/
+ios/App/build/
+ios/App/DerivedData/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+*.ipa
+*.dSYM.zip
+
 # 签名密钥与密码（切勿提交到 GitHub）
 android/app/app-release-key.jks
 android/keystore.properties

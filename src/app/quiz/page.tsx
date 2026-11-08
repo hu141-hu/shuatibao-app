@@ -13,6 +13,7 @@ import CustomQuizModal, { QuizMode } from '@/components/CustomQuizModal';
 import QuizBuilderModal from '@/components/QuizBuilderModal';
 import AnswerSheet from '@/components/AnswerSheet';
 import { useSwipeNav } from '@/lib/useSwipeNav';
+import { registerBackInterceptor } from '@/lib/backHandler';
 import { getChildren, getCategoryQuestions, getMasteryLevel, getCategoryStats, shuffleQuestions } from '@/lib/categoryUtils';
 import {
   buildQuizByPlan, restorePlanQuestions, quizPlanStorageKey,
@@ -615,6 +616,26 @@ function QuizContent() {
     if (selectedSectionId) { setSelectedSectionId(null); return; }
     if (selectedChapterId) { setSelectedChapterId(null); }
   };
+
+  // 硬件返回键跟随页面层级：正在答题/已在某级目录时先退这一级，
+  // 退到最外层再交给全局返回（回首页）。用 ref 保证拿到的是最新闭包。
+  const backActionRef = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    backActionRef.current = () => {
+      const hasLevel =
+        quizQuestions.length > 0 ||
+        !!selectedChapterId ||
+        !!selectedSectionId ||
+        !!selectedKnowledgeId;
+      if (!hasLevel) return false;
+      handleBack();
+      return true;
+    };
+  });
+
+  useEffect(() => {
+    return registerBackInterceptor(() => backActionRef.current());
+  }, []);
 
   const handleNext = useCallback(() => {
     if (currentIndex < quizQuestions.length - 1) {

@@ -34,7 +34,9 @@ const tabs = [
 ];
 
 export default function BottomNav() {
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  // 开了 trailingSlash 后 pathname 形如 /profile/，直接和 '/profile' 比较会永远不高亮
+  const pathname = rawPathname === '/' ? '/' : rawPathname.replace(/\/+$/, '');
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 backdrop-blur-xl bg-white/80 dark:bg-slate-800/80 border-t border-gray-200/50 dark:border-slate-700/50 transition-colors duration-300">

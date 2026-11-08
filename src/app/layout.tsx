@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { StoreProvider, ThemeProvider } from "@/lib/store";
 import BottomNav from "@/components/BottomNav";
+import BackButtonHandler from "@/components/BackButtonHandler";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 import UpdateChecker from "@/components/UpdateChecker";
 
@@ -48,6 +49,7 @@ export default function RootLayout({
             {children}
           </main>
           <BottomNav />
+          <BackButtonHandler />
           <ServiceWorkerRegister />
           <UpdateChecker />
           </StoreProvider>
